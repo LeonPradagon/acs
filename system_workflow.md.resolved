@@ -1,0 +1,279 @@
+# Alur Kerja Sistem: ACS Intelligence Assistant
+
+Dokumen ini menjelaskan **arsitektur** dan **alur kerja** lengkap dari sistem ACS Intelligence Assistant — mulai dari pengguna mengetik pertanyaan hingga jawaban ditampilkan di layar.
+
+---
+
+## 1. Arsitektur Umum (High-Level)
+
+```mermaid
+graph TB
+    subgraph FRONTEND["🖥️ Frontend (Next.js)"]
+        UI["User Interface"]
+        Hooks["Custom Hooks<br/>(useChat, useRAG)"]
+        Types["Types (chat.ts)"]
+    end
+
+    subgraph BACKEND["⚙️ Backend (Express.js)"]
+        MW["Middleware<br/>(Auth + Classification)"]
+        Routes["Routes<br/>(auth, chat, rag)"]
+        Controllers["Controllers<br/>(auth, chat, rag)"]
+        Services["Services Layer<br/>(11 services)"]
+    end
+
+    subgraph EXTERNAL["🌐 External Services"]
+        Groq["Groq API<br/>(Llama 3.3 70B)"]
+        ES["Elasticsearch<br/>(Vector Search)"]
+        PG["PostgreSQL<br/>(Prisma ORM)"]
+    end
+
+    UI --> Hooks
+    Hooks --> Routes
+    Routes --> MW --> Controllers --> Services
+    Services --> Groq
+    Services --> ES
+    Services --> PG
+```
+
+---
+
+## 2. Alur Autentikasi
+
+```mermaid
+sequenceDiagram
+    participant U as User (Browser)
+    participant FE as Frontend
+    participant AUTH as /api/auth
+    participant MW as Auth Middleware
+    participant DB as PostgreSQL
+
+    U->>FE: Masukkan username & password
+    FE->>AUTH: POST /api/auth/login
+    AUTH->>DB: Cek kredensial (bcrypt)
+    DB-->>AUTH: User data
+    AUTH-->>FE: { accessToken, refreshToken }
+    FE->>FE: Simpan token di localStorage
+
+    Note over FE,MW: Setiap request selanjutnya...
+
+    FE->>MW: Request + Bearer Token
+    MW->>MW: Verify JWT
+    MW->>MW: Set req.user & req.classification
+    MW-->>FE: ✅ Authorized / ❌ 401
+```
+
+| Endpoint | Method | Fungsi |
+|---|---|---|
+| `/api/auth/login` | POST | Login, dapat access & refresh token |
+| `/api/auth/refresh` | POST | Refresh access token |
+| `/api/auth/profile` | GET | Ambil data user saat ini |
+| `/api/auth/logout` | POST | Logout + blacklist token |
+| `/api/auth/verify` | GET | Verifikasi validitas token |
+| `/api/auth/users` | GET | Daftar semua user (admin) |
+
+---
+
+## 3. Alur Chat / Query AI
+
+Ini adalah **alur utama** saat pengguna mengajukan pertanyaan.
+
+```mermaid
+flowchart TD
+    A["👤 User mengetik pertanyaan"] --> B{Mode yang dipilih?}
+
+    B -->|Q&A / Summary| C["POST /api/chat/advanced-query"]
+    B -->|Enhanced Visual| D["POST /api/chat/universal-visual"]
+    B -->|Ontology| E["POST /api/chat/ontology"]
+    B -->|Strategic| F["POST /api/chat/strategic-analysis"]
+
+    C --> G["chatController.advancedQuery"]
+    D --> H["chatController.universalVisual"]
+    E --> I["chatController.ontology"]
+    F --> J["chatController.strategicAnalysis"]
+
+    G --> K["Services Layer"]
+    H --> K
+    I --> K
+    J --> K
+
+    K --> L["ragService.query()<br/>Cari konteks dari dokumen"]
+    K --> M["aiService<br/>Kirim ke Groq LLM"]
+    K --> N["visualAnalysisService<br/>Generate visualisasi"]
+    K --> O["ontologyService<br/>Ekstrak entitas & relasi"]
+
+    L --> P["Elasticsearch<br/>(Vector Search)"]
+    M --> Q["Groq API<br/>(Llama 3.3 70B)"]
+
+    P --> R["Context Merger"]
+    Q --> R
+    N --> R
+    O --> R
+
+    R --> S["Response + Visualisasi + Sources"]
+    S --> T["👤 User melihat jawaban"]
+```
+
+### Detail Endpoint Chat
+
+| Endpoint | Fungsi | Service Utama |
+|---|---|---|
+| `/api/chat/advanced-query` | Analisis teks lanjutan + security scan | ai, rag, processor |
+| `/api/chat/universal-visual` | Analisis visual + Elasticsearch data | visual-analysis, rag |
+| `/api/chat/ontology` | Knowledge graph & entity extraction | ontology, rag |
+| `/api/chat/strategic-analysis` | SWOT, threat matrix, fishbone | visual-analysis, rag |
+| `/api/chat/smart-query` | Auto-detect tipe analisis | ai, visual-analysis |
+| `/api/chat/visual-request` | Request visualisasi spesifik | visual-analysis |
+| `/api/chat/quick-visual` | Visualisasi cepat dari topik | visual-analysis |
+| `/api/chat/query` | Query dasar RAG | rag, ai, processor |
+
+---
+
+## 4. Alur RAG (Document Upload & Retrieval)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as Frontend (useRAG)
+    participant API as /api/rag
+    participant RAG as ragController
+    participant ES as Elasticsearch
+    participant DB as PostgreSQL
+
+    Note over U,DB: 📤 Upload Dokumen
+
+    U->>FE: Pilih file (PDF/TXT)
+    FE->>API: POST /api/rag/documents (multipart)
+    API->>RAG: uploadDocuments()
+    RAG->>RAG: Parse & chunk dokumen
+    RAG->>ES: Index chunks + embeddings
+    RAG->>DB: Simpan metadata dokumen
+    RAG-->>FE: ✅ Upload berhasil
+
+    Note over U,DB: 🔍 Pencarian Konteks (saat Query)
+
+    FE->>API: ragService.query(question)
+    API->>ES: Vector similarity search
+    ES-->>API: Top-K relevant chunks
+    API-->>FE: Konteks dokumen + skor relevansi
+```
+
+| Endpoint | Method | Fungsi |
+|---|---|---|
+| `/api/rag/documents` | POST | Upload dokumen (PDF/TXT, max 10MB) |
+| `/api/rag/documents/uploaded` | GET | Daftar dokumen yang sudah diupload |
+| `/api/rag/documents/:id` | DELETE | Hapus dokumen |
+| `/api/rag/search` | GET | Cari dokumen berdasarkan query |
+| `/api/rag/index-info` | GET | Info index Elasticsearch |
+
+---
+
+## 5. Alur Security & Classification
+
+```mermaid
+flowchart LR
+    A["Request masuk"] --> B["Auth Middleware"]
+    B --> C{Token valid?}
+    C -->|Tidak| D["❌ 401 Unauthorized"]
+    C -->|Ya| E["Set req.user"]
+    E --> F["Classification Middleware"]
+    F --> G{Role & Clearance}
+    G -->|Publik| H["Akses: Publik saja"]
+    G -->|Internal| I["Akses: Publik + Internal"]
+    G -->|Terbatas| J["Akses: + Terbatas"]
+    G -->|Rahasia| K["Akses: Semua level"]
+    H & I & J & K --> L["Controller menerima request"]
+    L --> M["PII Masking"]
+    M --> N["Security Scan"]
+    N --> O["Response ke User"]
+```
+
+### Level Klasifikasi Dokumen
+
+| Level | Warna | Siapa yang boleh akses |
+|---|---|---|
+| **Rahasia** | 🔴 Merah | Admin saja |
+| **Terbatas** | 🟠 Oranye | Analyst + Admin |
+| **Internal** | 🟡 Kuning | User + Analyst + Admin |
+| **Publik** | 🟢 Hijau | Semua pengguna |
+
+---
+
+## 6. Layer Services
+
+```mermaid
+graph LR
+    subgraph Controllers
+        CC["chatController"]
+        AC["authController"]
+        RC["ragController"]
+    end
+
+    subgraph Services["Services (11 files)"]
+        AI["ai.service<br/>(Groq LLM)"]
+        RAG["rag.service<br/>(Document retrieval)"]
+        VA["visual-analysis.service<br/>(Visualisasi)"]
+        ONT["ontology.service<br/>(Knowledge Graph)"]
+        AUTH["auth.service<br/>(JWT + bcrypt)"]
+        CLS["classification.service<br/>(Tingkat keamanan)"]
+        POL["policy-analysis.service<br/>(Analisis kebijakan)"]
+        QC["query-classifier.service<br/>(Klasifikasi query)"]
+        PROC["processor.service<br/>(Post-processing)"]
+        SEARCH["search.service<br/>(Pencarian)"]
+        TOOL["tool-calling.service<br/>(Tool calling)"]
+    end
+
+    CC --> AI & RAG & VA & ONT & PROC & SEARCH & TOOL & QC & POL
+    AC --> AUTH
+    RC --> RAG
+```
+
+---
+
+## 7. Technology Stack
+
+| Layer | Teknologi |
+|---|---|
+| **Frontend** | Next.js 14 (App Router), React, TypeScript, Tailwind CSS |
+| **Backend** | Express.js, Node.js |
+| **Database** | PostgreSQL + Prisma ORM |
+| **Search Engine** | Elasticsearch (vector search + full-text) |
+| **AI/LLM** | Groq API → Llama 3.3 70B Versatile |
+| **Auth** | JWT (access + refresh tokens), bcrypt |
+| **File Upload** | Multer (memory storage, max 10MB) |
+| **Security** | Helmet, CORS, PII masking, security scan |
+
+---
+
+## 8. Ringkasan Folder Project
+
+```
+acs-master/ (Backend)
+├── index.js              # Entry point + global middleware
+├── middleware/
+│   └── auth.middleware.js # JWT + classification guard
+├── routes/
+│   ├── auth.routes.js     # Auth endpoints
+│   ├── chat.js            # Chat endpoints → chatController
+│   └── rag.js             # RAG endpoints → ragController
+├── controllers/
+│   ├── auth.controller.js # Login, logout, profile
+│   ├── chat.controller.js # Visual, query, ontology
+│   └── rag.controller.js  # Upload, delete, search
+├── services/ (11 files)   # Business logic layer
+├── prisma/                # Database schema & migrations
+└── elasticsearch/         # ES setup & configuration
+
+bin-intelligence-assistant/ (Frontend)
+├── app/
+│   ├── page.tsx           # Landing page
+│   ├── login/             # Login page
+│   └── analyst-workspace/ # Main workspace
+├── components/
+│   ├── ai-model.tsx       # Main AI chat component
+│   └── ui/                # Reusable UI components
+├── hooks/
+│   ├── useChat.ts         # Chat API state management
+│   └── useRAG.ts          # RAG document management
+└── types/
+    └── chat.ts            # Shared TypeScript interfaces
+```
