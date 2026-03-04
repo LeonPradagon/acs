@@ -1,0 +1,11 @@
+﻿components/ai-query-input.tsx(14,9): error TS2322: Type '{ onProcessComplete: (data: any) => void; initialMode: string; initialPersona: string; initialModel: string; }' is not assignable to type 'IntrinsicAttributes & AIQueryInputProps & RefAttributes<any>'.
+  Property 'initialModel' does not exist on type 'IntrinsicAttributes & AIQueryInputProps & RefAttributes<any>'. Did you mean 'initialMode'?
+components/chat/visualization-panel.tsx(97,42): error TS2345: Argument of type '(insight: string, i: number) => React.JSX.Element' is not assignable to parameter of type '(value: unknown, index: number, array: unknown[]) => Element'.
+  Types of parameters 'insight' and 'value' are incompatible.
+    Type 'unknown' is not assignable to type 'string'.
+components/chat/visualization-panel.tsx(118,49): error TS2345: Argument of type '(rec: string, i: number) => React.JSX.Element' is not assignable to parameter of type '(value: unknown, index: number, array: unknown[]) => Element'.
+  Types of parameters 'rec' and 'value' are incompatible.
+    Type 'unknown' is not assignable to type 'string'.
+hooks/useChat.ts(4,25): error TS2307: Cannot find module '@/hooks/use-auth' or its corresponding type declarations.
+hooks/useRAG.ts(2,10): error TS2614: Module '"@/lib/api-client"' has no exported member 'apiClient'. Did you mean to use 'import apiClient from "@/lib/api-client"' instead?
+hooks/useRAG.ts(112,28): error TS7006: Parameter 'progressEvent' implicitly has an 'any' type.
