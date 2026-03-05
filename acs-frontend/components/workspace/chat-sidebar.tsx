@@ -1,18 +1,27 @@
 "use client";
 
-import React from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Plus,
   MessageSquare,
   Trash2,
-  ChevronLeft,
-  ChevronRight,
+  Pencil,
+  Check,
   X,
+  MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { ChatSessionItem } from "@/lib/ai-query.service";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuPortal,
+} from "@/components/ui/dropdown-menu";
 
 interface ChatSidebarProps {
   sessions: ChatSessionItem[];
@@ -22,6 +31,7 @@ interface ChatSidebarProps {
   onNewSession: () => void;
   onSelectSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
+  onRenameSession?: (id: string, title: string) => void;
 }
 
 export function ChatSidebar({
@@ -32,7 +42,44 @@ export function ChatSidebar({
   onNewSession,
   onSelectSession,
   onDeleteSession,
+  onRenameSession,
 }: ChatSidebarProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingId]);
+
+  const startRename = (session: ChatSessionItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(session.id);
+    setEditTitle(session.title || "New Chat");
+  };
+
+  const confirmRename = () => {
+    if (editingId && editTitle.trim() && onRenameSession) {
+      onRenameSession(editingId, editTitle.trim());
+    }
+    setEditingId(null);
+  };
+
+  const cancelRename = () => {
+    setEditingId(null);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      confirmRename();
+    } else if (e.key === "Escape") {
+      cancelRename();
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -72,39 +119,117 @@ export function ChatSidebar({
               sessions.map((session) => (
                 <div
                   key={session.id}
-                  onClick={() => onSelectSession(session.id)}
                   className={cn(
-                    "group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors",
+                    "group relative flex items-center rounded-lg transition-colors border border-transparent mb-0.5",
                     currentSessionId === session.id
-                      ? "bg-secondary text-secondary-foreground font-medium shadow-sm"
+                      ? "bg-secondary text-secondary-foreground font-medium shadow-sm border-border/50"
                       : "bg-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                   )}
                 >
-                  <div className="flex items-center gap-2.5 overflow-hidden">
-                    <MessageSquare
-                      className={cn(
-                        "w-4 h-4 shrink-0 transition-colors",
-                        currentSessionId === session.id
-                          ? "text-primary"
-                          : "text-muted-foreground/70 group-hover:text-foreground/80",
-                      )}
-                    />
-                    <div className="truncate text-sm">
-                      {session.title || "New Chat"}
+                  {editingId === session.id ? (
+                    /* Inline Rename Mode */
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1.5">
+                      <Input
+                        ref={editInputRef}
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        onBlur={confirmRename}
+                        className="h-7 text-sm px-2 py-0 bg-background border-border"
+                      />
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={confirmRename}
+                          className="h-6 w-6 shrink-0 text-green-500 hover:bg-green-500/10"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={cancelRename}
+                          className="h-6 w-6 shrink-0 text-muted-foreground hover:bg-muted/50"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    /* Normal Display Mode */
+                    <div className="flex-1 min-w-0 flex items-center h-full group/item relative">
+                      {/* Selection Area */}
+                      <div
+                        className="flex-1 min-w-0 py-2.5 px-3 cursor-pointer"
+                        onClick={() => onSelectSession(session.id)}
+                      >
+                        <div
+                          className="truncate text-sm pr-6"
+                          title={session.title || "New Chat"}
+                        >
+                          {session.title || "New Chat"}
+                        </div>
+                      </div>
 
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteSession(session.id);
-                    }}
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive shrink-0 rounded-md data-[state=open]:opacity-100 -mr-1"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                      {/* Options Button Area */}
+                      <div
+                        className={cn(
+                          "absolute right-1.5 top-1/2 -translate-y-1/2 transition-opacity z-20",
+                          currentSessionId === session.id
+                            ? "opacity-100"
+                            : "opacity-0 group-hover/item:opacity-100",
+                        )}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                      >
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-muted-foreground/10 focus:outline-none focus:ring-0 transition-colors"
+                              type="button"
+                              aria-label="Opsi chat"
+                            >
+                              <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuPortal>
+                            <DropdownMenuContent
+                              align="end"
+                              side="right"
+                              sideOffset={8}
+                              className="w-44 p-1.5 bg-popover border border-border shadow-2xl rounded-xl z-[9999] animate-in zoom-in-95 fade-in duration-200"
+                            >
+                              {onRenameSession && (
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startRename(session, e as any);
+                                  }}
+                                  className="flex items-center gap-2.5 px-3 py-2.5 text-xs font-semibold cursor-pointer rounded-lg hover:bg-accent focus:bg-accent transition-colors"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                                  <span>Rename</span>
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeleteSession(session.id);
+                                }}
+                                className="flex items-center gap-2.5 px-3 py-2.5 text-xs font-semibold cursor-pointer rounded-lg text-destructive hover:bg-destructive/10 focus:bg-destructive/10 focus:text-destructive transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Delete</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenuPortal>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -112,7 +237,7 @@ export function ChatSidebar({
         </ScrollArea>
       </div>
 
-      {/* Collapse Toggle Button (Hover Tab) outside the sliding panel */}
+      {/* Collapse Toggle Button */}
       <div
         className={cn(
           "absolute top-1/2 -translate-y-1/2 transition-transform duration-300 ease-in-out z-50",

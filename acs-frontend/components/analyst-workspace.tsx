@@ -8,14 +8,12 @@ import { useSession } from "@/hooks/useSession";
 
 // sub-components
 import { WorkspaceHeader } from "./workspace/workspace-header";
-import { DocumentUploadModal } from "./workspace/DocumentUploadModal";
 
 /**
  * Main Analyst Workspace — Full-screen chat with header
  */
 export function AnalystWorkspace() {
   const session = useSession();
-  const [showUploadModal, setShowUploadModal] = useState(false);
 
   const currentTime = new Date().toLocaleString("id-ID", {
     weekday: "long",
@@ -34,14 +32,8 @@ export function AnalystWorkspace() {
           <WorkspaceHeader
             handleLogout={session.handleLogout}
             currentTime={currentTime}
-            onUploadClick={() => setShowUploadModal(true)}
           />
         }
-      />
-
-      <DocumentUploadModal
-        isOpen={showUploadModal}
-        onClose={() => setShowUploadModal(false)}
       />
     </div>
   );

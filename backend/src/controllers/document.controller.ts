@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { prisma, esClient } from "../config/db";
 import fs from "fs";
 import path from "path";
-const pdfParse = require("pdf-parse");
+import { DocumentExtractorService } from "../services/document-extractor.service";
 
 /**
  * Handle multiple document uploads with PostgreSQL storage and Elasticsearch indexing.
@@ -34,23 +34,15 @@ export const uploadDocuments = async (req: Request, res: Response) => {
       let content = "";
 
       try {
-        // Handle different file types for text extraction
-        if (file.mimetype === "application/pdf") {
-          const dataBuffer = fs.readFileSync(file.path);
-          const data = await pdfParse(dataBuffer);
-          content = data.text;
-        } else {
-          // Default for .txt and others - read as UTF-8
-          content = fs.readFileSync(file.path, "utf-8");
-          // Remove null bytes which cause PostgreSQL encoding errors
-          content = content.replace(/\0/g, "");
-        }
+        content = await DocumentExtractorService.extractHybrid(
+          file.path,
+          file.mimetype,
+        );
       } catch (extractError: any) {
         console.error(
           `Failed to extract text from ${file.originalname}:`,
           extractError,
         );
-        // Fallback or continue? Let's skip this file or use empty content
         content = `[Content extraction failed for ${file.originalname}]`;
       }
 

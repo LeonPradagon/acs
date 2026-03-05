@@ -1,7 +1,37 @@
-import React from "react";
+"use client";
+
+import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import { Copy, Check } from "lucide-react";
+
+/**
+ * Small button to copy code block content
+ */
+const CopyCodeButton = ({ code }: { code: string }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="absolute top-2 right-2 p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-all opacity-0 group-hover/code:opacity-100"
+      title="Copy code"
+    >
+      {copied ? (
+        <Check className="w-3.5 h-3.5 text-green-400" />
+      ) : (
+        <Copy className="w-3.5 h-3.5" />
+      )}
+    </button>
+  );
+};
 
 /**
  * Component to render text with markdown properly (tables, HTML tags, headings, lists, bold, blockquotes)
@@ -97,6 +127,8 @@ export const MarkdownText = ({ text }: { text: string }) => {
           code: ({ node, className, children, ...props }: any) => {
             const match = /language-(\w+)/.exec(className || "");
             const isInline = !match && !className?.includes("language-");
+            const codeString = String(children).replace(/\n$/, "");
+
             return isInline ? (
               <code
                 className="bg-muted px-1.5 py-0.5 rounded text-[0.85em] font-mono text-pink-600 dark:text-pink-400"
@@ -105,13 +137,24 @@ export const MarkdownText = ({ text }: { text: string }) => {
                 {children}
               </code>
             ) : (
-              <div className="overflow-x-auto my-3 rounded-md bg-zinc-950 p-4 border border-zinc-800">
-                <code
-                  className={`block text-[0.85em] font-mono text-zinc-50 leading-relaxed ${className || ""}`}
-                  {...props}
-                >
-                  {children}
-                </code>
+              <div className="relative overflow-x-auto my-3 rounded-md bg-zinc-950 border border-zinc-800 group/code">
+                {/* Language label */}
+                {match && (
+                  <div className="flex items-center justify-between px-4 py-1.5 border-b border-zinc-800 bg-zinc-900/50">
+                    <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
+                      {match[1]}
+                    </span>
+                  </div>
+                )}
+                <CopyCodeButton code={codeString} />
+                <div className="p-4 overflow-x-auto">
+                  <code
+                    className={`block text-[0.85em] font-mono text-zinc-50 leading-relaxed ${className || ""}`}
+                    {...props}
+                  >
+                    {children}
+                  </code>
+                </div>
               </div>
             );
           },

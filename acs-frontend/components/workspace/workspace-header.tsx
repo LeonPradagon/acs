@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 interface WorkspaceHeaderProps {
   handleLogout: () => void;
   currentTime: string;
-  onUploadClick: () => void;
 }
 
 /**
@@ -15,7 +14,6 @@ interface WorkspaceHeaderProps {
 export const WorkspaceHeader = ({
   handleLogout,
   currentTime,
-  onUploadClick,
 }: WorkspaceHeaderProps) => {
   return (
     <header className="border-b border-border bg-card">

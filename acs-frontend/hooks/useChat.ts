@@ -27,6 +27,9 @@ export const useChat = (options: UseChatOptions = {}) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // AbortController for stop generation
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Function to load all sessions
   const loadSessionsList = useCallback(async () => {
     try {
@@ -84,6 +87,13 @@ export const useChat = (options: UseChatOptions = {}) => {
   useEffect(() => {
     scrollToBottom();
   }, [chatHistory, streamingContent, scrollToBottom]);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   // --- Session Actions ---
 
@@ -168,6 +178,152 @@ export const useChat = (options: UseChatOptions = {}) => {
     navigator.clipboard.writeText(text);
   }, [chatHistory]);
 
+  // --- Stop Generation ---
+  const stopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+
+      // Save whatever content was streamed so far as a message
+      setStreamingContent((currentContent) => {
+        if (currentContent) {
+          const partialMessage: ChatMessage = {
+            id: Date.now().toString(),
+            content:
+              currentContent + "\n\n*(Generasi dihentikan oleh pengguna)*",
+            role: "assistant",
+            timestamp: new Date(),
+          };
+          setChatHistory((prev) => [...prev, partialMessage]);
+        }
+        return "";
+      });
+
+      setIsProcessing(false);
+    }
+  }, []);
+
+  // --- Regenerate Last Response ---
+  const handleRegenerate = useCallback(async () => {
+    // Find the last user message
+    const lastUserIndex = [...chatHistory]
+      .reverse()
+      .findIndex((m) => m.role === "user");
+    if (lastUserIndex === -1) return;
+
+    const actualIndex = chatHistory.length - 1 - lastUserIndex;
+    const lastUserMessage = chatHistory[actualIndex];
+
+    // Remove all messages after (and including) the last assistant response after this user message
+    const newHistory = chatHistory.slice(0, actualIndex + 1);
+    setChatHistory(newHistory);
+
+    // Re-send the query
+    handleProcess(
+      lastUserMessage.content,
+      "universal",
+      "universal",
+      "auto",
+      {},
+      newHistory,
+    );
+  }, [chatHistory]);
+
+  // --- Export to Markdown ---
+  const exportToMarkdown = useCallback(() => {
+    const lines: string[] = [];
+    lines.push("# Percakapan ACS AI Assistant");
+    lines.push(`*Diekspor pada ${new Date().toLocaleString("id-ID")}*\n`);
+    lines.push("---\n");
+
+    chatHistory
+      .filter((m) => m.id !== "welcome" && m.id !== "cleared")
+      .forEach((msg) => {
+        const role =
+          msg.role === "user" ? "👤 **Anda**" : "🤖 **ACS AI Assistant**";
+        const time =
+          msg.timestamp instanceof Date
+            ? msg.timestamp.toLocaleTimeString("id-ID", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "";
+        lines.push(`### ${role} ${time ? `_(${time})_` : ""}`);
+        lines.push("");
+        lines.push(msg.content);
+        lines.push("");
+        lines.push("---\n");
+      });
+
+    const blob = new Blob([lines.join("\n")], {
+      type: "text/markdown;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chat-export-${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [chatHistory]);
+
+  // --- Feedback ---
+  const submitFeedback = useCallback(
+    async (messageId: string, rating: "thumbs_up" | "thumbs_down") => {
+      try {
+        await aiQueryService.submitFeedback(messageId, rating);
+        return true;
+      } catch (err) {
+        console.error("Failed to submit feedback:", err);
+        return false;
+      }
+    },
+    [],
+  );
+
+  // --- Rename Session ---
+  const handleRenameSession = useCallback(
+    async (sessionId: string, title: string) => {
+      try {
+        await aiQueryService.renameSession(sessionId, title);
+        await loadSessionsList();
+      } catch (err) {
+        console.error("Failed to rename session:", err);
+      }
+    },
+    [loadSessionsList],
+  );
+
+  // --- Edit & Re-submit ---
+  const handleEditAndResubmit = useCallback(
+    async (messageIndex: number, newContent: string) => {
+      // Remove this message and everything after it
+      const newHistory = chatHistory.slice(0, messageIndex);
+
+      // Add the edited message
+      const editedMessage: ChatMessage = {
+        id: Date.now().toString(),
+        content: newContent,
+        role: "user",
+        timestamp: new Date(),
+      };
+      const updatedHistory = [...newHistory, editedMessage];
+      setChatHistory(updatedHistory);
+
+      // Re-process with the edited query
+      handleProcess(
+        newContent,
+        "universal",
+        "universal",
+        "auto",
+        {},
+        updatedHistory,
+      );
+    },
+    [chatHistory],
+  );
+
   /**
    * Process a user message with streaming response
    */
@@ -177,6 +333,7 @@ export const useChat = (options: UseChatOptions = {}) => {
     _persona: string,
     _ontologyMode: string,
     _ontologyOptions: any,
+    existingHistory?: ChatMessage[],
   ) => {
     if (!userQuery.trim() || isProcessing) return;
 
@@ -193,23 +350,30 @@ export const useChat = (options: UseChatOptions = {}) => {
       }
     }
 
-    // Add user message to UI
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      content: userQuery,
-      role: "user",
-      timestamp: new Date(),
-    };
+    // Add user message to UI (only if not regenerating — regenerating already has it)
+    const currentHistory = existingHistory || chatHistory;
+    if (!existingHistory) {
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        content: userQuery,
+        role: "user",
+        timestamp: new Date(),
+      };
+      setChatHistory((prev) => [...prev, userMessage]);
+    }
 
-    setChatHistory((prev) => [...prev, userMessage]);
     setIsProcessing(true);
     setStreamingContent("");
     setError("");
     setQuery("");
 
+    // Create AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       // Build conversation history for memory (exclude welcome message)
-      const historyForAPI = chatHistory
+      const historyForAPI = currentHistory
         .filter((m) => m.id !== "welcome" && m.id !== "cleared")
         .map((m) => ({
           role: m.role,
@@ -224,6 +388,7 @@ export const useChat = (options: UseChatOptions = {}) => {
           setStreamingContent((prev) => prev + token);
         },
         activeSessionId || undefined,
+        controller.signal,
       );
 
       setChatHistory((prev) => [...prev, result]);
@@ -237,6 +402,9 @@ export const useChat = (options: UseChatOptions = {}) => {
         options.onProcessComplete(result);
       }
     } catch (err: any) {
+      // Don't log abort errors — they're user-initiated
+      if (err.name === "AbortError") return;
+
       console.error("Error processing query:", err);
 
       const errorMessage =
@@ -257,6 +425,7 @@ export const useChat = (options: UseChatOptions = {}) => {
       setApiStatus("error");
     } finally {
       setIsProcessing(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -285,5 +454,12 @@ export const useChat = (options: UseChatOptions = {}) => {
     handleNewSession,
     handleSelectSession,
     handleDeleteSession,
+    handleRenameSession,
+    // New features
+    stopGeneration,
+    handleRegenerate,
+    handleEditAndResubmit,
+    exportToMarkdown,
+    submitFeedback,
   };
 };

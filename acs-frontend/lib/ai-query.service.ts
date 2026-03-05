@@ -51,6 +51,21 @@ export const checkHealth = async (): Promise<boolean> => {
   }
 };
 
+// ===== Feedback =====
+
+export const submitFeedback = async (
+  messageId: string,
+  rating: "thumbs_up" | "thumbs_down",
+  comment?: string,
+): Promise<any> => {
+  const res = await apiClient.post("/api/chat/feedback", {
+    messageId,
+    rating,
+    comment,
+  });
+  return res.data.data;
+};
+
 // ===== Utilities =====
 
 export const validateAndFixAnalysisData = (data: any): any => {
@@ -70,6 +85,7 @@ export const streamChatRequest = async (
   onSources?: (sources: any[]) => void,
   onDone?: (model: string) => void,
   onError?: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<void> => {
   const token =
     typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
@@ -86,6 +102,7 @@ export const streamChatRequest = async (
       model: options.model || "openai/gpt-oss-120b",
       sessionId: options.sessionId,
     }),
+    signal,
   });
 
   if (!response.ok) throw new Error(`Stream failed: ${response.status}`);
@@ -96,35 +113,44 @@ export const streamChatRequest = async (
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        try {
-          const data = JSON.parse(line.slice(6));
-          switch (data.type) {
-            case "token":
-              onToken(data.token);
-              break;
-            case "sources":
-              onSources?.(data.sources);
-              break;
-            case "done":
-              onDone?.(data.model);
-              break;
-            case "error":
-              onError?.(data.message);
-              break;
-          }
-        } catch {}
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            switch (data.type) {
+              case "token":
+                onToken(data.token);
+                break;
+              case "sources":
+                onSources?.(data.sources);
+                break;
+              case "done":
+                onDone?.(data.model);
+                break;
+              case "error":
+                onError?.(data.message);
+                break;
+            }
+          } catch {}
+        }
       }
     }
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      // User cancelled — this is expected
+      reader.cancel();
+      return;
+    }
+    throw err;
   }
 };
 
@@ -135,6 +161,7 @@ export const processQuery = async (
   chatHistory: { role: string; content: string }[],
   onStreamToken?: (token: string) => void,
   sessionId?: string,
+  signal?: AbortSignal,
 ): Promise<ChatMessage> => {
   const startTime = Date.now();
 
@@ -170,6 +197,7 @@ export const processQuery = async (
         (errorMsg) => {
           reject(new Error(errorMsg));
         },
+        signal,
       );
     });
   }
@@ -202,12 +230,21 @@ export const processQuery = async (
   }
 };
 
+export const renameSession = async (
+  sessionId: string,
+  title: string,
+): Promise<void> => {
+  await apiClient.patch(`/api/chat/sessions/${sessionId}`, { title });
+};
+
 export const aiQueryService = {
   checkHealth,
   processQuery,
   streamChatRequest,
   listSessions,
   createSession,
+  renameSession,
   deleteSession,
   loadSessionHistory,
+  submitFeedback,
 };
