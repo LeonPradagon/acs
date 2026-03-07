@@ -283,6 +283,7 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
     model = "openai/gpt-oss-120b",
     messages = [],
     sessionId,
+    files = [],
   } = req.body;
 
   // Input validation
@@ -356,23 +357,32 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
         }
 
         // Save to database + auto-title
+        // Save to database + auto-title
         if (sessionId) {
-          // Save messages
-          prisma.chatHistory
-            .createMany({
-              data: [
-                { sessionId, role: "user", content: question },
-                { sessionId, role: "assistant", content: fullResponse },
-              ],
-            })
-            .catch((err) =>
-              console.warn("[Stream] Failed to save history:", err),
-            );
+          // Save messages sequentially to be safer and catch errors
+          (async () => {
+            try {
+              await prisma.chatHistory.create({
+                data: {
+                  sessionId,
+                  role: "user",
+                  content: question,
+                  files: files && files.length > 0 ? files : null,
+                },
+              });
 
-          // AI-Generated Title: use LLM for better titles
-          (prisma as any).chatSession
-            .findUnique({ where: { id: sessionId } })
-            .then(async (session: any) => {
+              await prisma.chatHistory.create({
+                data: {
+                  sessionId,
+                  role: "assistant",
+                  content: fullResponse,
+                },
+              });
+
+              // AI-Generated Title: use LLM for better titles
+              const session = await (prisma as any).chatSession.findUnique({
+                where: { id: sessionId },
+              });
               if (session && session.title === "New Chat") {
                 const aiTitle = await generateSessionTitle(
                   question,
@@ -383,14 +393,15 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
                   data: { title: aiTitle, updatedAt: new Date() },
                 });
               } else {
-                // Just update timestamp
                 await (prisma as any).chatSession.update({
                   where: { id: sessionId },
                   data: { updatedAt: new Date() },
                 });
               }
-            })
-            .catch(() => {});
+            } catch (err) {
+              console.error("[StreamChat] Error saving history:", err);
+            }
+          })();
         }
       },
     );
@@ -419,6 +430,7 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
     model = "openai/gpt-oss-120b",
     messages = [],
     sessionId,
+    files = [],
     ...options
   } = req.body;
 
@@ -452,21 +464,27 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
 
     if (sessionId) {
       try {
-        await prisma.chatHistory.createMany({
-          data: [
-            { sessionId, role: "user", content: question },
-            {
-              sessionId,
-              role: "assistant",
-              content:
-                typeof responseData.data === "string"
-                  ? responseData.data
-                  : JSON.stringify(responseData.data),
-            },
-          ],
+        await prisma.chatHistory.create({
+          data: {
+            sessionId,
+            role: "user",
+            content: question,
+            files: files && files.length > 0 ? files : null,
+          },
+        });
+
+        await prisma.chatHistory.create({
+          data: {
+            sessionId,
+            role: "assistant",
+            content:
+              typeof responseData.data === "string"
+                ? responseData.data
+                : JSON.stringify(responseData.data),
+          },
         });
       } catch (dbErr) {
-        console.warn("[Chat] Failed to save history:", dbErr);
+        console.warn("[UniversalChat] Failed to save history:", dbErr);
       }
     }
 

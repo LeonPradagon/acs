@@ -37,6 +37,7 @@ export const loadSessionHistory = async (
     content: m.content,
     role: m.role,
     timestamp: new Date(m.createdAt),
+    files: m.files,
   }));
 };
 
@@ -101,6 +102,7 @@ export const streamChatRequest = async (
       messages,
       model: options.model || "openai/gpt-oss-120b",
       sessionId: options.sessionId,
+      files: options.files || [],
     }),
     signal,
   });
@@ -162,6 +164,7 @@ export const processQuery = async (
   onStreamToken?: (token: string) => void,
   sessionId?: string,
   signal?: AbortSignal,
+  files?: any[],
 ): Promise<ChatMessage> => {
   const startTime = Date.now();
 
@@ -174,7 +177,7 @@ export const processQuery = async (
       streamChatRequest(
         userQuery,
         chatHistory,
-        { sessionId },
+        { sessionId, files },
         (token) => {
           fullContent += token;
           onStreamToken(token);
@@ -208,6 +211,7 @@ export const processQuery = async (
       question: userQuery,
       messages: chatHistory,
       sessionId,
+      files,
     });
     const result = res.data;
     return {

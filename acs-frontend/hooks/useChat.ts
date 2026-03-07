@@ -334,6 +334,7 @@ export const useChat = (options: UseChatOptions = {}) => {
     _ontologyMode: string,
     _ontologyOptions: any,
     existingHistory?: ChatMessage[],
+    files?: any[],
   ) => {
     if (!userQuery.trim() || isProcessing) return;
 
@@ -358,6 +359,7 @@ export const useChat = (options: UseChatOptions = {}) => {
         content: userQuery,
         role: "user",
         timestamp: new Date(),
+        files: files && files.length > 0 ? files : undefined,
       };
       setChatHistory((prev) => [...prev, userMessage]);
     }
@@ -389,6 +391,7 @@ export const useChat = (options: UseChatOptions = {}) => {
         },
         activeSessionId || undefined,
         controller.signal,
+        files,
       );
 
       setChatHistory((prev) => [...prev, result]);

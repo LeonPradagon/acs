@@ -178,6 +178,12 @@ export interface OntologyResponse {
 
 // ==================== ANALYSIS & CHAT TYPES ====================
 
+export interface ChatFile {
+  name: string;
+  type: string;
+  size: number;
+}
+
 export interface AnalysisResult {
   type: string;
   title: string;
@@ -218,6 +224,7 @@ export interface ChatMessage {
   security_level?: string;
   analysis_results?: AnalysisResult[];
   ontology_data?: OntologyResponse;
+  files?: ChatFile[];
 }
 
 export interface AdvancedVisualResponse {

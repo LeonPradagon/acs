@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { AnalystWorkspace } from "../../components/analyst-workspace";
+import { AnalystWorkspace } from "@/components/analyst-workspace";
 
 export default function AnalystWorkspacePage() {
   const router = useRouter();

@@ -10,6 +10,7 @@ import {
   ThumbsDown,
   Pencil,
   X,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -135,14 +136,18 @@ export const ChatMessageView = ({
       >
         <div
           className={cn(
-            "w-9 h-9 flex items-center justify-center rounded-xl flex-shrink-0 mt-0.5 shadow-sm transition-all duration-300",
+            "w-9 h-9 flex items-center justify-center rounded-xl flex-shrink-0 mt-0.5 transition-all duration-300 overflow-hidden",
             isAssistant
-              ? "bg-gradient-to-tr from-purple-600 to-indigo-600 text-white"
-              : "bg-muted text-muted-foreground border border-border/40",
+              ? "bg-transparent"
+              : "bg-muted text-muted-foreground border border-border/40 shadow-sm",
           )}
         >
           {isAssistant ? (
-            <Bot className="w-5 h-5" />
+            <img
+              src="/images/Asisgo.png"
+              alt="AI"
+              className="w-full h-full object-contain"
+            />
           ) : (
             <User className="w-5 h-5" />
           )}
@@ -224,7 +229,31 @@ export const ChatMessageView = ({
                 <MessageContentRouter message={message} />
               </div>
             ) : (
-              <MarkdownText text={message.content} />
+              <div className="space-y-3">
+                <MarkdownText text={message.content} />
+                {message.files && message.files.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {message.files.map((file, idx) => (
+                      <div
+                        key={`${file.name}-${idx}`}
+                        className="flex items-center gap-2 bg-muted/50 border border-border/50 rounded-xl px-3 py-2 text-sm hover:bg-muted/80 transition-colors shadow-sm"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                          <FileText className="w-4 h-4 text-indigo-500" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="max-w-[150px] truncate text-xs font-semibold">
+                            {file.name}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {(file.size / 1024).toFixed(1)} KB
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

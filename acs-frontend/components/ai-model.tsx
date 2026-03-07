@@ -87,11 +87,16 @@ function WelcomeScreen({
         <img
           src="/images/Asisgo.png"
           alt="Logo"
-          className="w-12 h-12 object-contain mb-3"
+          className="w-16 h-16 object-contain mb-3"
         />
-        <span className="text-[10px] font-bold tracking-[0.3em] text-muted-foreground/40 uppercase">
-          Acs Assistant
-        </span>
+        <div className="flex flex-col leading-tight">
+          <span className="text-2xl font-black text-foreground uppercase tracking-tight">
+            ACS
+          </span>
+          <span className="text-[10px] font-bold tracking-[0.3em] text-muted-foreground/40 uppercase">
+            Assistant
+          </span>
+        </div>
       </div>
 
       {/* Tighter Greeting Section */}
@@ -183,17 +188,35 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
   };
 
   const handleSendMessage = async () => {
-    if (rag.uploadedFiles.length > 0 && !rag.isUploading) {
-      const success = await rag.uploadDocuments();
-      if (!success) return; // Stop if upload failed
+    let currentFiles: any[] = [];
+    if (rag.uploadedFiles.length > 0) {
+      // Capture file info before they are cleared
+      currentFiles = rag.uploadedFiles.map((f) => ({
+        name: f.name,
+        type: f.type,
+        size: f.size,
+      }));
 
-      // Minor sync delay to ensure the backend DB commit/ES refresh is complete
-      // before the first query attempts retrieval.
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (!rag.isUploading) {
+        const success = await rag.uploadDocuments();
+        if (!success) return; // Stop if upload failed
+
+        // Minor sync delay to ensure the backend DB commit/ES refresh is complete
+        // before the first query attempts retrieval.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
     }
 
     if (chat.query.trim()) {
-      chat.handleProcess(chat.query, "universal", "universal", "auto", {});
+      chat.handleProcess(
+        chat.query,
+        "universal",
+        "universal",
+        "auto",
+        {},
+        undefined,
+        currentFiles,
+      );
     }
   };
 

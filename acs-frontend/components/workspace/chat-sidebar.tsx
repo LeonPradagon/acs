@@ -203,8 +203,6 @@ export function ChatSidebar({
                                 className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  // Debugging: Cek console apakah tombol ini terklik
-                                  // console.log("Trigger clicked");
                                 }}
                               >
                                 <MoreHorizontal className="w-4 h-4 pointer-events-none" />
