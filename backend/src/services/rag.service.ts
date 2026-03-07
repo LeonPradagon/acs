@@ -112,10 +112,24 @@ const META_KEYWORDS = [
   "terbaru",
   "tadi",
   "barusan",
+  "baru saja",
   "tabel",
   "table",
   "isinya",
   "data",
+  "terakhir",
+  "pengunggahan",
+  "berkas",
+  "lampiran",
+  "isi dari",
+  "summary",
+  "ringkasan",
+  "isi",
+  "bacakan",
+  "apa",
+  "tentang",
+  "data baru",
+  "file baru",
 ];
 
 /**
@@ -134,10 +148,31 @@ function extractKeywords(query: string): string[] {
  * with a PostgreSQL fallback using all meaningful query words.
  */
 export const retrieveContext = async (query: string): Promise<RagContext[]> => {
-  const contexts: RagContext[] = [];
+  let contexts: RagContext[] = [];
+  const queryLower = query.toLowerCase();
 
+  // 1. Detection: Is the user asking about recent uploads?
+  const isAskingAboutRecent = META_KEYWORDS.some((kw) =>
+    queryLower.includes(kw.toLowerCase()),
+  );
+
+  // 2. Proactive: Get very recent documents (last 5 minutes)
+  let recentDocs: any[] = [];
   try {
-    // 1. Elasticsearch Keyword / Full-Text Search
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    recentDocs = await prisma.document.findMany({
+      where: {
+        createdAt: { gte: fiveMinutesAgo },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    });
+  } catch (err) {
+    console.warn("[RAG] Failed to fetch very recent docs:", err);
+  }
+
+  // 3. Search Elasticsearch
+  try {
     const esResponse = await esClient.search({
       index: "documents",
       query: {
@@ -170,85 +205,75 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
     }
   }
 
-  // 2. PostgreSQL Fallback — use ALL meaningful keywords with OR logic
-  if (contexts.length === 0) {
+  // 4. PostgreSQL Keyword Fallback (if ES is sparse)
+  if (contexts.length < 3) {
     try {
       const keywords = extractKeywords(query);
       if (keywords.length > 0) {
-        const whereConditions = keywords.map((word) => ({
-          content: {
-            contains: word,
-            mode: "insensitive" as const,
-          },
-        }));
-
         const pgDocs = await prisma.document.findMany({
           where: {
-            OR: whereConditions,
+            OR: keywords.map((word) => ({
+              content: { contains: word, mode: "insensitive" },
+            })),
           },
-          take: 10,
+          take: 5,
         });
 
-        const scoredDocs = pgDocs.map((doc) => {
-          const contentLower = doc.content.toLowerCase();
-          const titleLower = (doc.title || "").toLowerCase();
-          let score = 0;
-
-          keywords.forEach((keyword) => {
-            if (contentLower.includes(keyword)) score += 1;
-            if (titleLower.includes(keyword)) score += 2;
-          });
-
-          score = score / (keywords.length * 3);
-
-          return {
-            content: doc.content,
-            source: doc.title || "PostgreSQL Document",
-            score: Math.min(score, 1.0),
-          };
+        pgDocs.forEach((doc) => {
+          // Avoid duplicates
+          if (!contexts.some((c) => c.content === doc.content)) {
+            contexts.push({
+              content: doc.content,
+              source: doc.title || "PostgreSQL Document",
+              score: 0.5,
+            });
+          }
         });
-
-        scoredDocs
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 5)
-          .forEach((doc) => contexts.push(doc));
       }
     } catch (err) {
-      console.warn(
-        "[RAG] PostgreSQL fallback search failed:",
-        err instanceof Error ? err.message : err,
-      );
+      console.warn("[RAG] PostgreSQL fallback search failed:", err);
     }
   }
 
-  // 3. Recency Fallback — If still empty, check if asking about "uploaded files"/meta-info
-  if (contexts.length === 0) {
-    const isAskingAboutFiles = META_KEYWORDS.some((kw) =>
-      query.toLowerCase().includes(kw),
-    );
+  // 5. Integration: Merge Recent Docs if user is asking about them OR if context is still sparse
+  if (recentDocs.length > 0) {
+    recentDocs.forEach((doc) => {
+      // Check if already in contexts to avoid duplicates
+      const exists = contexts.some(
+        (c) => c.content === doc.content || c.source === doc.title,
+      );
 
-    if (isAskingAboutFiles) {
-      try {
-        const recentDocs = await prisma.document.findMany({
-          orderBy: { createdAt: "desc" },
-          take: 3,
-        });
-
-        recentDocs.forEach((doc) => {
+      if (!exists) {
+        if (isAskingAboutRecent) {
+          // Priority: Add to the beginning if asking about recent
+          contexts.unshift({
+            content: doc.content,
+            source: doc.title,
+            score: 0.95, // High score for better accuracy/priority
+          });
+        } else if (contexts.length < 2) {
+          // Supplemental: Add if context is empty/sparse
           contexts.push({
             content: doc.content,
-            source: `${doc.title} (Recently Uploaded)`,
-            score: 0.5,
+            source: doc.title,
+            score: 0.85,
           });
-        });
-        console.log(
-          `[RAG] Meta-query detected, added ${recentDocs.length} recent documents.`,
-        );
-      } catch (err) {
-        console.warn("[RAG] Recency fallback failed:", err);
+        }
       }
-    }
+    });
   }
 
-  return contexts;
+  // 6. Safety Fallback: If still no context, force include the absolute latest documents
+  // even if they don't explicitly match keywords, to catch "just uploaded" files.
+  if (contexts.length === 0 && recentDocs.length > 0) {
+    recentDocs.slice(0, 3).forEach((doc) => {
+      contexts.push({
+        content: doc.content,
+        source: doc.title,
+        score: 0.8,
+      });
+    });
+  }
+
+  return contexts.slice(0, 5); // Keep top 5 most relevant/recent
 };

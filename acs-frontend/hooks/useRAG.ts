@@ -81,10 +81,10 @@ export const useRAG = () => {
     }));
   }, []);
 
-  const uploadDocuments = async () => {
+  const uploadDocuments = async (): Promise<boolean> => {
     if (uploadedFiles.length === 0) {
       setUploadError("Pilih minimal satu file untuk diupload");
-      return;
+      return false;
     }
 
     setIsUploading(true);
@@ -137,6 +137,7 @@ export const useRAG = () => {
           setUploadSuccess("");
           setShowUploadSuccess(false);
         }, 2000);
+        return true;
       } else {
         throw new Error(response.data.error || "Upload gagal");
       }
@@ -145,6 +146,7 @@ export const useRAG = () => {
       setUploadError(
         err.response?.data?.error || err.message || "Upload gagal",
       );
+      return false;
     } finally {
       setIsUploading(false);
       setUploadProgress(0);

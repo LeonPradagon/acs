@@ -160,7 +160,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      chat.handleProcess(chat.query, "universal", "universal", "auto", {});
+      handleSendMessage();
     }
   };
 
@@ -182,6 +182,21 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
     );
   };
 
+  const handleSendMessage = async () => {
+    if (rag.uploadedFiles.length > 0 && !rag.isUploading) {
+      const success = await rag.uploadDocuments();
+      if (!success) return; // Stop if upload failed
+
+      // Minor sync delay to ensure the backend DB commit/ES refresh is complete
+      // before the first query attempts retrieval.
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+
+    if (chat.query.trim()) {
+      chat.handleProcess(chat.query, "universal", "universal", "auto", {});
+    }
+  };
+
   // Determine if we should show welcome screen
   const showWelcome =
     chat.chatHistory.length <= 1 &&
@@ -190,7 +205,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
 
   return (
     <>
-      <div className="flex h-full w-full overflow-hidden">
+      <div className="flex h-full w-full overflow-hidden relative">
         {/* Chat Sidebar */}
         <ChatSidebar
           sessions={chat.sessions}
@@ -329,17 +344,6 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                         </button>
                       </div>
                     ))}
-
-                    {/* Inline Actions for Selected Files */}
-                    {rag.uploadedFiles.length > 0 && !rag.isUploading && (
-                      <Button
-                        size="sm"
-                        onClick={() => rag.uploadDocuments()}
-                        className="h-7 text-xs rounded-full bg-indigo-600 hover:bg-indigo-700 text-white px-3"
-                      >
-                        Upload Now
-                      </Button>
-                    )}
                   </div>
 
                   {/* Upload Status / Progress */}
@@ -388,26 +392,20 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                     size="icon"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={chat.isProcessing || rag.isUploading}
-                    className="h-9 w-9 text-muted-foreground/40 hover:bg-muted rounded-full"
+                    className="h-9 w-9 bg-[#33345c]/5 border border-[#33345c]/10 text-[#33345c] hover:bg-[#33345c]/15 hover:scale-105 active:scale-95 transition-all rounded-full"
                   >
                     <Upload className="w-4 h-4" />
                   </Button>
                   <Button
-                    onClick={() =>
-                      chat.handleProcess(
-                        chat.query,
-                        "universal",
-                        "universal",
-                        "auto",
-                        {},
-                      )
-                    }
+                    onClick={handleSendMessage}
                     disabled={
-                      !chat.query.trim() || chat.isProcessing || rag.isUploading
+                      (!chat.query.trim() && rag.uploadedFiles.length === 0) ||
+                      chat.isProcessing ||
+                      rag.isUploading
                     }
-                    className="h-9 w-9 rounded-full bg-foreground text-background hover:opacity-90 transition-all flex items-center justify-center shadow-lg"
+                    className="h-9 w-9 rounded-full bg-[#33345c] text-white hover:bg-[#33345c]/95 hover:scale-105 active:scale-95 transition-all flex items-center justify-center shadow-lg shadow-[#33345c]/20"
                   >
-                    {chat.isProcessing ? (
+                    {chat.isProcessing || rag.isUploading ? (
                       <RefreshCw className="w-4 h-4 animate-spin" />
                     ) : (
                       <Send className="w-4 h-4" />
@@ -434,7 +432,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                     size="icon"
                     onClick={chat.exportToMarkdown}
                     title="Export ke Markdown"
-                    className="h-6 w-6 text-muted-foreground/20 hover:text-muted-foreground"
+                    className="h-6 w-6 bg-[#33345c]/5 border border-[#33345c]/10 text-[#33345c] hover:bg-[#33345c]/15 hover:scale-105 active:scale-95 transition-all"
                   >
                     <Download className="w-3 h-3" />
                   </Button>
@@ -443,7 +441,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                     size="icon"
                     onClick={chat.copyConversation}
                     title="Copy percakapan"
-                    className="h-6 w-6 text-muted-foreground/20 hover:text-muted-foreground"
+                    className="h-6 w-6 bg-[#33345c]/5 border border-[#33345c]/10 text-[#33345c] hover:bg-[#33345c]/15 hover:scale-105 active:scale-95 transition-all"
                   >
                     <Copy className="w-3 h-3" />
                   </Button>

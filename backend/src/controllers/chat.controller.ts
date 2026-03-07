@@ -28,6 +28,7 @@ const DATA_PATTERNS = [
   /\b(analisis|analysis|monitor|intelijen|intelligence)\b/i,
   /\b(berapa|jumlah|total|persentase|percentage)\b/i,
   /\b(tahun|year|bulan|month|kuartal|quarter)\b\s*\d/i,
+  /\b(isi|berkas|bacakan|ringkas|summary|file)\b/i,
 ];
 
 function shouldSkipRAG(query: string): boolean {
@@ -35,7 +36,8 @@ function shouldSkipRAG(query: string): boolean {
   if (hasDataPattern) return false;
 
   const hasGeneralPattern = GENERAL_PATTERNS.some((p) => p.test(query));
-  if (hasGeneralPattern && query.length < 200) return true;
+  // Be more conservative: skip only if remarkably general AND short
+  if (hasGeneralPattern && query.length < 100) return true;
 
   return false;
 }

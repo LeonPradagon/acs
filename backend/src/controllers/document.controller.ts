@@ -69,6 +69,7 @@ export const uploadDocuments = async (req: Request, res: Response) => {
         await esClient.index({
           index: "documents",
           id: doc.id,
+          refresh: true,
           document: {
             title: doc.title,
             content: doc.content,
@@ -79,7 +80,9 @@ export const uploadDocuments = async (req: Request, res: Response) => {
             timestamp: new Date(),
           },
         });
-        console.log(`✅ Indexed document ${doc.id} to Elasticsearch`);
+        console.log(
+          `✅ Indexed document ${doc.id} to Elasticsearch (refreshed)`,
+        );
       } catch (esError) {
         console.error(`❌ Failed to index document ${doc.id} to ES:`, esError);
       }

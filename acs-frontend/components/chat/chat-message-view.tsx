@@ -253,7 +253,7 @@ export const ChatMessageView = ({
                   variant="ghost"
                   size="icon"
                   onClick={handleCopyMessage}
-                  className="h-7 w-7 text-muted-foreground/30 hover:text-muted-foreground hover:bg-muted/50 rounded-lg transition-all"
+                  className="h-7 w-7 bg-[#33345c]/5 border border-[#33345c]/10 text-[#33345c] hover:bg-[#33345c]/15 hover:scale-105 active:scale-95 rounded-lg transition-all"
                   title="Copy"
                 >
                   {copied ? (
