@@ -203,7 +203,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
 
         // Minor sync delay to ensure the backend DB commit/ES refresh is complete
         // before the first query attempts retrieval.
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 1200));
       }
     }
 
