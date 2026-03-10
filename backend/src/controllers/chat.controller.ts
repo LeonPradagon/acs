@@ -4,8 +4,9 @@ import {
   getUniversalResponse,
   getStreamingResponse,
 } from "../services/groq.service";
-import { prisma } from "../config/db";
 import { AuthRequest } from "../middleware/auth.middleware";
+import { ChatService } from "../services/chat.service";
+import { SessionService } from "../services/session.service";
 
 // ============================================================
 // Helper: Query Classification — skip RAG for general questions
@@ -43,237 +44,6 @@ function shouldSkipRAG(query: string): boolean {
 }
 
 // ============================================================
-// Input Validation
-// ============================================================
-const MAX_QUERY_LENGTH = 5000;
-const MAX_MESSAGES_LENGTH = 50;
-
-function validateChatInput(
-  question: any,
-  messages: any,
-): { valid: boolean; error?: string } {
-  if (!question || typeof question !== "string") {
-    return { valid: false, error: "Question is required" };
-  }
-  if (question.trim().length === 0) {
-    return { valid: false, error: "Question cannot be empty" };
-  }
-  if (question.length > MAX_QUERY_LENGTH) {
-    return {
-      valid: false,
-      error: `Question exceeds maximum length of ${MAX_QUERY_LENGTH} characters`,
-    };
-  }
-  if (messages && !Array.isArray(messages)) {
-    return { valid: false, error: "Messages must be an array" };
-  }
-  if (messages && messages.length > MAX_MESSAGES_LENGTH) {
-    return {
-      valid: false,
-      error: `Too many messages (max ${MAX_MESSAGES_LENGTH})`,
-    };
-  }
-  return { valid: true };
-}
-
-// ============================================================
-// Session Management
-// ============================================================
-
-/**
- * List all chat sessions for the authenticated user
- */
-export const listSessions = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    const sessions = await (prisma as any).chatSession.findMany({
-      where: userId ? { userId } : {},
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        createdAt: true,
-        updatedAt: true,
-        messages: {
-          take: 1,
-          orderBy: { createdAt: "asc" },
-          where: { role: "user" },
-          select: { content: true },
-        },
-      },
-    });
-    res.status(200).json({ success: true, data: sessions });
-  } catch (error: any) {
-    console.error("[Sessions] List error:", error);
-    res.status(500).json({ success: false, error: "Failed to load sessions" });
-  }
-};
-
-/**
- * Create a new chat session linked to the authenticated user
- */
-export const createSession = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    const session = await (prisma as any).chatSession.create({
-      data: {
-        title: "New Chat",
-        ...(userId ? { userId } : {}),
-      },
-    });
-    res.status(201).json({ success: true, data: session });
-  } catch (error: any) {
-    console.error("[Sessions] Create error:", error);
-    res.status(500).json({ success: false, error: "Failed to create session" });
-  }
-};
-
-/**
- * Rename a chat session
- */
-export const renameSession = async (req: AuthRequest, res: Response) => {
-  const { sessionId } = req.params;
-  const { title } = req.body;
-  const userId = req.user?.userId;
-
-  if (!title || typeof title !== "string" || title.trim().length === 0) {
-    return res.status(400).json({ success: false, error: "Title is required" });
-  }
-
-  try {
-    const session = await (prisma as any).chatSession.findUnique({
-      where: { id: sessionId },
-    });
-
-    if (!session) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Session not found" });
-    }
-
-    if (session.userId && userId && session.userId !== userId) {
-      return res.status(403).json({ success: false, error: "Not authorized" });
-    }
-
-    const updated = await (prisma as any).chatSession.update({
-      where: { id: sessionId },
-      data: { title: title.trim().substring(0, 100) },
-    });
-
-    res.status(200).json({ success: true, data: updated });
-  } catch (error: any) {
-    console.error("[Sessions] Rename error:", error);
-    res.status(500).json({ success: false, error: "Failed to rename session" });
-  }
-};
-
-/**
- * Delete a chat session (only if owned by user)
- */
-export const deleteSession = async (req: AuthRequest, res: Response) => {
-  const { sessionId } = req.params;
-  const userId = req.user?.userId;
-
-  try {
-    // Verify ownership
-    const session = await (prisma as any).chatSession.findUnique({
-      where: { id: sessionId },
-    });
-
-    if (!session) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Session not found" });
-    }
-
-    if (session.userId && userId && session.userId !== userId) {
-      return res.status(403).json({
-        success: false,
-        error: "Not authorized to delete this session",
-      });
-    }
-
-    await (prisma as any).chatSession.delete({
-      where: { id: sessionId },
-    });
-    res.status(200).json({ success: true });
-  } catch (error: any) {
-    console.error("[Sessions] Delete error:", error);
-    res.status(500).json({ success: false, error: "Failed to delete session" });
-  }
-};
-
-/**
- * Load chat history for a session (with ownership check)
- */
-export const getChatHistory = async (req: AuthRequest, res: Response) => {
-  const { sessionId } = req.params;
-  const userId = req.user?.userId;
-
-  try {
-    // Verify ownership
-    const session = await (prisma as any).chatSession.findUnique({
-      where: { id: sessionId },
-    });
-
-    if (!session) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Session not found" });
-    }
-
-    if (session.userId && userId && session.userId !== userId) {
-      return res
-        .status(403)
-        .json({ success: false, error: "Not authorized to view this session" });
-    }
-
-    const history = await prisma.chatHistory.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: "asc" },
-    });
-    res.status(200).json({ success: true, data: history });
-  } catch (error: any) {
-    console.error("[Chat] History error:", error);
-    res
-      .status(500)
-      .json({ success: false, error: "Failed to load chat history" });
-  }
-};
-
-// ============================================================
-// AI-Generated Session Title
-// ============================================================
-
-async function generateSessionTitle(
-  question: string,
-  answer: string,
-): Promise<string> {
-  try {
-    const { getUniversalResponse } = await import("../services/groq.service");
-    const result = await getUniversalResponse(
-      `Berikan judul singkat (maksimal 5 kata) untuk percakapan berikut. Jawab HANYA dengan judul saja, tanpa tanda kutip atau penjelasan.
-
-Pertanyaan: ${question.substring(0, 200)}
-Jawaban: ${answer.substring(0, 200)}`,
-      [],
-      "openai/gpt-oss-120b",
-      [],
-    );
-
-    const title = (result.data as string)
-      .replace(/["""''']/g, "")
-      .trim()
-      .substring(0, 80);
-
-    return title || question.substring(0, 60);
-  } catch {
-    // Fallback to truncated question
-    return question.substring(0, 60) + (question.length > 60 ? "..." : "");
-  }
-}
-
-// ============================================================
 // Streaming Chat Endpoint (SSE)
 // ============================================================
 
@@ -285,12 +55,6 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
     sessionId,
     files = [],
   } = req.body;
-
-  // Input validation
-  const validation = validateChatInput(question, messages);
-  if (!validation.valid) {
-    return res.status(400).json({ error: validation.error });
-  }
 
   // Set SSE headers
   res.setHeader("Content-Type", "text/event-stream");
@@ -307,8 +71,19 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
 
   try {
     // 1. Query Classification — skip RAG for general knowledge
+    if (!isClientDisconnected) {
+      res.write(
+        `data: ${JSON.stringify({ type: "step", step: "🔍 Mengklasifikasikan query..." })}\n\n`,
+      );
+    }
+
     let contexts: any[] = [];
     if (!shouldSkipRAG(question)) {
+      if (!isClientDisconnected) {
+        res.write(
+          `data: ${JSON.stringify({ type: "step", step: "📚 Mencari referensi di database internal..." })}\n\n`,
+        );
+      }
       contexts = await retrieveContext(question);
     }
 
@@ -334,6 +109,9 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
           })),
         })}\n\n`,
       );
+      res.write(
+        `data: ${JSON.stringify({ type: "step", step: "🧠 Menyusun jawaban berdasarkan konteks..." })}\n\n`,
+      );
     }
 
     // 3. Stream tokens
@@ -352,52 +130,30 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
       },
       () => {
         if (!isClientDisconnected) {
+          res.write(
+            `data: ${JSON.stringify({ type: "step", step: "✅ Selesai" })}\n\n`,
+          );
           res.write(`data: ${JSON.stringify({ type: "done", model })}\n\n`);
           res.end();
         }
 
-        // Save to database + auto-title
-        // Save to database + auto-title
+        // Save to database + auto-title (fire and forget with error handling)
         if (sessionId) {
-          // Save messages sequentially to be safer and catch errors
           (async () => {
             try {
-              await prisma.chatHistory.create({
-                data: {
-                  sessionId,
-                  role: "user",
-                  content: question,
-                  files: files && files.length > 0 ? files : null,
-                },
-              });
+              await ChatService.saveMessages(
+                sessionId,
+                question,
+                fullResponse,
+                files,
+              );
 
-              await prisma.chatHistory.create({
-                data: {
-                  sessionId,
-                  role: "assistant",
-                  content: fullResponse,
-                },
-              });
-
-              // AI-Generated Title: use LLM for better titles
-              const session = await (prisma as any).chatSession.findUnique({
-                where: { id: sessionId },
-              });
-              if (session && session.title === "New Chat") {
-                const aiTitle = await generateSessionTitle(
-                  question,
-                  fullResponse,
-                );
-                await (prisma as any).chatSession.update({
-                  where: { id: sessionId },
-                  data: { title: aiTitle, updatedAt: new Date() },
-                });
-              } else {
-                await (prisma as any).chatSession.update({
-                  where: { id: sessionId },
-                  data: { updatedAt: new Date() },
-                });
-              }
+              // AI-Generated Title for new sessions
+              const aiTitle = await ChatService.generateSessionTitle(
+                question,
+                fullResponse,
+              );
+              await SessionService.updateTitleIfDefault(sessionId, aiTitle);
             } catch (err) {
               console.error("[StreamChat] Error saving history:", err);
             }
@@ -431,14 +187,7 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
     messages = [],
     sessionId,
     files = [],
-    ...options
   } = req.body;
-
-  // Input validation
-  const validation = validateChatInput(question, messages);
-  if (!validation.valid) {
-    return res.status(400).json({ error: validation.error });
-  }
 
   try {
     // Query Classification
@@ -464,25 +213,16 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
 
     if (sessionId) {
       try {
-        await prisma.chatHistory.create({
-          data: {
-            sessionId,
-            role: "user",
-            content: question,
-            files: files && files.length > 0 ? files : null,
-          },
-        });
-
-        await prisma.chatHistory.create({
-          data: {
-            sessionId,
-            role: "assistant",
-            content:
-              typeof responseData.data === "string"
-                ? responseData.data
-                : JSON.stringify(responseData.data),
-          },
-        });
+        const answerContent =
+          typeof responseData.data === "string"
+            ? responseData.data
+            : JSON.stringify(responseData.data);
+        await ChatService.saveMessages(
+          sessionId,
+          question,
+          answerContent,
+          files,
+        );
       } catch (dbErr) {
         console.warn("[UniversalChat] Failed to save history:", dbErr);
       }
@@ -527,84 +267,5 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       error: "Terjadi kesalahan saat memproses permintaan. Silakan coba lagi.",
     });
-  }
-};
-
-// ============================================================
-// Health Check
-// ============================================================
-
-export const healthCheck = (req: Request, res: Response) => {
-  res.status(200).json({ status: "healthy", timestamp: new Date() });
-};
-
-// ============================================================
-// Feedback System (👍/👎)
-// ============================================================
-
-/**
- * Submit feedback for a chat message
- */
-export const submitFeedback = async (req: AuthRequest, res: Response) => {
-  const { messageId, rating, comment } = req.body;
-  const userId = req.user?.userId;
-
-  if (!messageId || !rating) {
-    return res
-      .status(400)
-      .json({ success: false, error: "messageId and rating are required" });
-  }
-
-  if (!["thumbs_up", "thumbs_down"].includes(rating)) {
-    return res.status(400).json({
-      success: false,
-      error: "Rating must be 'thumbs_up' or 'thumbs_down'",
-    });
-  }
-
-  try {
-    const feedback = await (prisma as any).chatFeedback.upsert({
-      where: { messageId },
-      update: { rating, comment: comment || null },
-      create: {
-        messageId,
-        userId: userId || null,
-        rating,
-        comment: comment || null,
-      },
-    });
-
-    res.status(200).json({ success: true, data: feedback });
-  } catch (error: any) {
-    console.error("[Feedback] Submit error:", error);
-    res.status(500).json({ success: false, error: "Failed to save feedback" });
-  }
-};
-
-/**
- * Get feedback for messages in a session
- */
-export const getFeedback = async (req: AuthRequest, res: Response) => {
-  const { sessionId } = req.params;
-
-  try {
-    const messages = await (prisma as any).chatHistory.findMany({
-      where: { sessionId },
-      include: {
-        feedback: true,
-      },
-    });
-
-    const feedbackMap: Record<string, any> = {};
-    messages.forEach((m: any) => {
-      if (m.feedback) {
-        feedbackMap[m.id] = m.feedback;
-      }
-    });
-
-    res.status(200).json({ success: true, data: feedbackMap });
-  } catch (error: any) {
-    console.error("[Feedback] Get error:", error);
-    res.status(500).json({ success: false, error: "Failed to load feedback" });
   }
 };

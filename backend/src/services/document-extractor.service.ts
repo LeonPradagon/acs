@@ -3,11 +3,12 @@ import axios from "axios";
 import FormData from "form-data";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
+import { env } from "../common/env";
 const PDFParser = require("pdf2json");
 
 /**
  * Service to handle intelligent document extraction.
- * Implements a Hybrid Strategy: LlamaParse (Primary) -> Local Libraries (Fallback).
+ * Implements a Hybrid Strategy: LlamaParse (Primary) -> Tika (Secondary) -> Local Libraries (Fallback).
  */
 export class DocumentExtractorService {
   /**
@@ -199,8 +200,40 @@ export class DocumentExtractorService {
   }
 
   /**
+   * Secondary Extractor: Apache Tika (Local API)
+   * Excellent for almost all document types. Self-hosted and unlimited.
+   */
+  static async extractWithTika(
+    filePath: string,
+    mimetype: string,
+  ): Promise<string> {
+    const tikaUrl = env.TIKA_URL;
+
+    try {
+      console.log(`[Tika] Sending ${filePath} for extraction...`);
+      const fileStream = fs.createReadStream(filePath);
+
+      const response = await axios.put(`${tikaUrl}/tika`, fileStream, {
+        headers: {
+          Accept: "text/plain",
+          "Content-Type": mimetype || "application/octet-stream",
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+      });
+
+      console.log(`[Tika] Extraction successful for ${filePath}`);
+      // Remove empty lines and normalize whitespace slightly
+      return response.data.replace(/\n\s*\n/g, "\n\n").trim();
+    } catch (error: any) {
+      console.error("[Tika] API Error:", error.message);
+      throw new Error(`Tika extraction failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Ultimate Hybrid Extractor
-   * Tries LlamaParse -> local fallback -> raw text format
+   * Tries LlamaParse -> Tika -> local fallback -> raw text format
    */
   static async extractHybrid(
     filePath: string,
@@ -218,7 +251,20 @@ export class DocumentExtractorService {
       }
     }
 
-    // 2. Local Fallbacks based on MIME type
+    // 2. Try Apache Tika (if available) before local NodeJS fallbacks
+    try {
+      // Check if Tika is up quickly
+      await axios.get(env.TIKA_URL, { timeout: 1000 }).catch(() => {
+        throw new Error("Tika service not reachable");
+      });
+      return await this.extractWithTika(filePath, mimetype);
+    } catch (tikaErr: any) {
+      console.warn(
+        `[Extractor] Tika fallback failed or unavailable: ${tikaErr.message}. Switching to local NodeJS fallback...`,
+      );
+    }
+
+    // 3. Local NodeJS Fallbacks based on MIME type
     try {
       if (mimetype === "application/pdf") {
         return await this.extractWithPdf2Json(filePath);
@@ -241,7 +287,7 @@ export class DocumentExtractorService {
         return await this.extractWithXlsx(filePath);
       } else {
         // For .txt or other formats, just read as UTF-8
-        let content = fs.readFileSync(filePath, "utf-8");
+        let content = await fs.promises.readFile(filePath, "utf-8");
         return content.replace(/\0/g, ""); // remove null bytes
       }
     } catch (fallbackError: any) {

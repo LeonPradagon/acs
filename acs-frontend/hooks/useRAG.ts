@@ -121,7 +121,11 @@ export const useRAG = () => {
       });
 
       if (response.data.success) {
-        const successMsg = `${response.data.data.successful} file berhasil diupload!`;
+        const count =
+          response.data.data.queued ||
+          response.data.data.successful ||
+          uploadedFiles.length;
+        const successMsg = `${count} file berhasil diupload dan sedang diproses di latar belakang!`;
         setUploadSuccess(successMsg);
         setShowUploadSuccess(true);
 

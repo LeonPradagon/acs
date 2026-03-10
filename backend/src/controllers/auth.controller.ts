@@ -2,8 +2,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../config/db";
-
-const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key";
+import { env } from "../common/env";
 
 export const register = async (req: Request, res: Response) => {
   const { email, password, name } = req.body;
@@ -11,7 +10,7 @@ export const register = async (req: Request, res: Response) => {
   try {
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      return res.status(400).json({ error: "Email already exists" });
+      return res.status(409).json({ error: "Email already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -23,9 +22,11 @@ export const register = async (req: Request, res: Response) => {
       },
     });
 
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      env.JWT_SECRET,
+      { expiresIn: "7d" },
+    );
 
     res.status(201).json({
       message: "User registered successfully",
@@ -61,9 +62,11 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      env.JWT_SECRET,
+      { expiresIn: "7d" },
+    );
 
     res.status(200).json({
       success: true,
@@ -71,14 +74,14 @@ export const login = async (req: Request, res: Response) => {
       data: {
         user: {
           id: user.id,
-          username: user.email, // Maps email to username since they sign in via email
+          username: user.email,
           email: user.email,
           name: user.name,
-          role: "admin",
+          role: user.role,
         },
         tokens: {
           accessToken: token,
-          refreshToken: token, // Reusing token for simple implementation
+          refreshToken: token,
           expiresIn: "7d",
           remainingTime: 7 * 24 * 60 * 60,
         },
@@ -90,6 +93,7 @@ export const login = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: "Failed to login" });
   }
 };
+
 export const verifyToken = async (req: any, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
@@ -104,7 +108,7 @@ export const verifyToken = async (req: any, res: Response) => {
     res.status(200).json({
       success: true,
       data: {
-        remainingTime: 7 * 24 * 60 * 60, // Mocked for simplicity
+        remainingTime: 7 * 24 * 60 * 60,
         isExpiringSoon: false,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         user: {
@@ -127,7 +131,7 @@ export const refreshToken = async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: "Token required" });
 
   try {
-    const decoded: any = jwt.verify(incomingToken, JWT_SECRET);
+    const decoded: any = jwt.verify(incomingToken, env.JWT_SECRET);
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
     });
@@ -138,10 +142,8 @@ export const refreshToken = async (req: Request, res: Response) => {
 
     const newToken = jwt.sign(
       { userId: user.id, email: user.email },
-      JWT_SECRET,
-      {
-        expiresIn: "7d",
-      },
+      env.JWT_SECRET,
+      { expiresIn: "7d" },
     );
 
     res.status(200).json({
@@ -157,4 +159,4 @@ export const refreshToken = async (req: Request, res: Response) => {
   }
 };
 
-export const quickRefresh = refreshToken; // Alias for simplicity
+export const quickRefresh = refreshToken;

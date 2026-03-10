@@ -13,6 +13,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Bot,
   Brain,
   Send,
@@ -30,6 +37,7 @@ import {
   MessageSquare,
   Code,
   Lightbulb,
+  ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -139,8 +147,8 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
 
   const rag = useRAG();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedModel] = useState<string>("openai/gpt-oss-120b");
   const [userName, setUserName] = useState<string>("User");
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
 
   useEffect(() => {
     try {
@@ -207,7 +215,27 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
       }
     }
 
-    if (chat.query.trim()) {
+    let base64Images: string[] = [];
+    if (imageFiles.length > 0) {
+      if (chat.selectedModel !== "llama-3.2-90b-vision-preview") {
+        chat.setSelectedModel("llama-3.2-90b-vision-preview");
+      }
+
+      base64Images = await Promise.all(
+        imageFiles.map(
+          (file) =>
+            new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(file);
+            }),
+        ),
+      );
+
+      setImageFiles([]);
+    }
+
+    if (chat.query.trim() || base64Images.length > 0) {
       chat.handleProcess(
         chat.query,
         "universal",
@@ -216,6 +244,8 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
         {},
         undefined,
         currentFiles,
+        base64Images.length > 0 ? "llama-3.2-90b-vision-preview" : undefined,
+        base64Images,
       );
     }
   };
@@ -300,14 +330,43 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                   )}
 
                   {/* Thinking Indicator */}
-                  {chat.isProcessing && !chat.streamingContent && (
+                  {chat.isProcessing && (
                     <div className="flex flex-col w-full max-w-3xl mx-auto px-1 animate-in fade-in duration-500">
                       <div className="flex items-center gap-3 text-indigo-600/60 mb-2">
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                         <span className="text-[10px] font-bold uppercase tracking-widest">
-                          Thinking...
+                          {chat.streamingContent
+                            ? "Streaming..."
+                            : "Thinking..."}
                         </span>
                       </div>
+
+                      {/* Processing Steps */}
+                      {chat.processingSteps.length > 0 && (
+                        <div className="ml-6 space-y-1.5 border-l border-indigo-100 pl-4 py-1">
+                          {chat.processingSteps.map((step, idx) => (
+                            <div
+                              key={idx}
+                              className={cn(
+                                "text-[11px] flex items-center gap-2",
+                                idx === chat.processingSteps.length - 1
+                                  ? "text-indigo-600 font-medium animate-pulse"
+                                  : "text-muted-foreground/60",
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "w-1 h-1 rounded-full",
+                                  idx === chat.processingSteps.length - 1
+                                    ? "bg-indigo-600"
+                                    : "bg-muted-foreground/30",
+                                )}
+                              />
+                              {step}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                   <div ref={chat.messagesEndRef} className="h-40" />
@@ -339,13 +398,63 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                 type="file"
                 ref={fileInputRef}
                 onChange={(e) => {
-                  rag.handleFileSelect(e);
-                  // Optionally auto-upload immediately, or wait for user. We'll wait.
+                  const files = Array.from(e.target.files || []);
+                  const images = files.filter((f) =>
+                    f.type.startsWith("image/"),
+                  );
+                  const nonImages = files.filter(
+                    (f) => !f.type.startsWith("image/"),
+                  );
+
+                  if (images.length > 0) {
+                    setImageFiles((prev) => [...prev, ...images]);
+                  }
+
+                  if (nonImages.length > 0) {
+                    const dt = new DataTransfer();
+                    nonImages.forEach((f) => dt.items.add(f));
+                    rag.handleFileSelect({
+                      ...e,
+                      target: { ...e.target, files: dt.files },
+                    } as any);
+                  }
+
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = "";
+                  }
                 }}
                 className="hidden"
                 multiple
-                accept=".pdf,.txt,.docx,.csv,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                accept=".pdf,.txt,.docx,.csv,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,image/*"
               />
+
+              {imageFiles.length > 0 && (
+                <div className="px-4 pt-3 pb-1">
+                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto custom-scrollbar">
+                    {imageFiles.map((file, idx) => (
+                      <div
+                        key={`img-${file.name}-${idx}`}
+                        className="flex items-center gap-2 bg-muted/50 border border-border/50 rounded-full px-3 py-1 text-sm group"
+                      >
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-500" />
+                        <span className="max-w-[150px] truncate text-xs font-medium">
+                          {file.name}
+                        </span>
+                        <button
+                          onClick={() =>
+                            setImageFiles((prev) =>
+                              prev.filter((_, i) => i !== idx),
+                            )
+                          }
+                          className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {rag.uploadedFiles.length > 0 && (
                 <div className="px-4 pt-3 pb-1">
@@ -422,7 +531,9 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                   <Button
                     onClick={handleSendMessage}
                     disabled={
-                      (!chat.query.trim() && rag.uploadedFiles.length === 0) ||
+                      (!chat.query.trim() &&
+                        rag.uploadedFiles.length === 0 &&
+                        imageFiles.length === 0) ||
                       chat.isProcessing ||
                       rag.isUploading
                     }
@@ -444,12 +555,25 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Badge
-                    variant="outline"
-                    className="text-[8px] h-4 border-muted-foreground/10 text-muted-foreground/40 font-mono"
+                  <Select
+                    value={chat.selectedModel}
+                    onValueChange={chat.setSelectedModel}
+                    disabled={false}
                   >
-                    {getModelDisplayName(selectedModel)}
-                  </Badge>
+                    <SelectTrigger className="h-6 w-auto min-w-[100px] text-[8px] border-muted-foreground/20 text-muted-foreground/70 font-mono bg-transparent">
+                      <SelectValue placeholder="Pilih Model" />
+                    </SelectTrigger>
+                    <SelectContent
+                      align="end"
+                      className="text-[10px] font-mono"
+                    >
+                      {Object.entries(AVAILABLE_MODELS).map(([id, model]) => (
+                        <SelectItem key={id} value={id}>
+                          {model.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     variant="ghost"
                     size="icon"

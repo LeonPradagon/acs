@@ -225,6 +225,8 @@ export interface ChatMessage {
   analysis_results?: AnalysisResult[];
   ontology_data?: OntologyResponse;
   files?: ChatFile[];
+  images?: string[];
+  processingSteps?: string[];
 }
 
 export interface AdvancedVisualResponse {

@@ -80,10 +80,11 @@ export const validateAndFixAnalysisData = (data: any): any => {
 
 export const streamChatRequest = async (
   question: string,
-  messages: { role: string; content: string }[] = [],
+  messages: any[] = [],
   options: any = {},
   onToken: (token: string) => void,
   onSources?: (sources: any[]) => void,
+  onStep?: (step: string) => void,
   onDone?: (model: string) => void,
   onError?: (message: string) => void,
   signal?: AbortSignal,
@@ -135,6 +136,9 @@ export const streamChatRequest = async (
               case "sources":
                 onSources?.(data.sources);
                 break;
+              case "step":
+                onStep?.(data.step);
+                break;
               case "done":
                 onDone?.(data.model);
                 break;
@@ -160,11 +164,13 @@ export const streamChatRequest = async (
 
 export const processQuery = async (
   userQuery: string,
-  chatHistory: { role: string; content: string }[],
+  chatHistory: any[],
   onStreamToken?: (token: string) => void,
+  onStep?: (step: string) => void,
   sessionId?: string,
   signal?: AbortSignal,
   files?: any[],
+  model?: string,
 ): Promise<ChatMessage> => {
   const startTime = Date.now();
 
@@ -177,13 +183,16 @@ export const processQuery = async (
       streamChatRequest(
         userQuery,
         chatHistory,
-        { sessionId, files },
+        { sessionId, files, model },
         (token) => {
           fullContent += token;
           onStreamToken(token);
         },
         (s) => {
           sources = s;
+        },
+        (step) => {
+          onStep?.(step);
         },
         (model) => {
           modelUsed = model;

@@ -1,16 +1,21 @@
 import Groq from "groq-sdk";
-import dotenv from "dotenv";
 import { RagContext } from "./rag.service";
-
-dotenv.config();
+import { env } from "../common/env";
+import { withRetry } from "../common/retry";
 
 const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
+  apiKey: env.GROQ_API_KEY,
 });
 
 interface ChatMessageInput {
   role: "system" | "user" | "assistant";
-  content: string;
+  content:
+    | string
+    | Array<{
+        type: "text" | "image_url";
+        text?: string;
+        image_url?: { url: string };
+      }>;
 }
 
 /**
@@ -51,6 +56,14 @@ ${contextString}`
 };
 
 /**
+ * Check if an error is retryable (network/server errors, not auth errors)
+ */
+function isRetryableError(error: any): boolean {
+  if (error?.status && error.status >= 400 && error.status < 500) return false;
+  return true;
+}
+
+/**
  * Non-streaming universal response with conversation memory
  */
 export const getUniversalResponse = async (
@@ -61,42 +74,63 @@ export const getUniversalResponse = async (
 ): Promise<any> => {
   const systemPrompt = buildSystemPrompt(context);
 
-  // Build messages array: system + history + current query
-  const messages: ChatMessageInput[] = [
+  const messages: any[] = [
     { role: "system", content: systemPrompt },
-    ...conversationHistory,
-    { role: "user", content: query },
+    ...conversationHistory.map((m) => {
+      if (m.role === "system")
+        return {
+          role: "system",
+          content: m.content as string,
+        };
+      if (m.role === "user")
+        return {
+          role: "user",
+          content: m.content as any,
+        };
+      return {
+        role: "assistant",
+        content: m.content as string,
+      };
+    }),
+    { role: "user", content: query as any },
   ];
 
-  try {
-    const chatCompletion = await groq.chat.completions.create({
-      messages,
-      model: model || "llama3-70b-8192",
-      temperature: 0.3,
-      max_tokens: 4096,
-      top_p: 0.9,
-    });
+  const chatCompletion = await withRetry(
+    () =>
+      groq.chat.completions.create({
+        messages,
+        model: model || "llama3-70b-8192",
+        temperature: 0.3,
+        max_tokens: 4096,
+        top_p: 0.9,
+      }),
+    {
+      maxRetries: 3,
+      baseDelayMs: 1000,
+      shouldRetry: (err) => isRetryableError(err),
+    },
+  );
 
-    const output = chatCompletion.choices[0]?.message?.content || "";
+  const outputContent = chatCompletion.choices[0]?.message?.content || "";
+  const output =
+    typeof outputContent === "string"
+      ? outputContent
+      : JSON.stringify(outputContent);
 
-    // Parse if JSON format was returned
-    if (output.includes("```json")) {
-      try {
-        const jsonMatch = output.match(/```json\n([\s\S]*?)\n```/);
-        if (jsonMatch && jsonMatch[1]) {
-          const parsed = JSON.parse(jsonMatch[1]);
-          return { isJson: true, data: parsed };
-        }
-      } catch (e) {
-        console.warn("Failed to parse JSON from AI response.");
+  // Parse if JSON format was returned
+  if (output.includes("```json")) {
+    try {
+      const jsonMatch = output.match(/```json\n([\s\S]*?)\n```/);
+      if (jsonMatch && jsonMatch[1]) {
+        const parsed = JSON.parse(jsonMatch[1]);
+        return { isJson: true, data: parsed };
       }
+    } catch (e) {
+      console.warn("Failed to parse JSON from AI response.");
     }
-
-    return { isJson: false, data: output };
-  } catch (error: any) {
-    console.error("Groq API Error:", error);
-    throw new Error("Gagal memproses query melalui model AI.");
   }
+
+  return { isJson: false, data: output };
 };
 
 /**
@@ -112,32 +146,50 @@ export const getStreamingResponse = async (
 ): Promise<void> => {
   const systemPrompt = buildSystemPrompt(context);
 
-  const messages: ChatMessageInput[] = [
+  const messages: any[] = [
     { role: "system", content: systemPrompt },
-    ...conversationHistory,
-    { role: "user", content: query },
+    ...conversationHistory.map((m) => {
+      if (m.role === "system")
+        return {
+          role: "system",
+          content: m.content as string,
+        };
+      if (m.role === "user")
+        return {
+          role: "user",
+          content: m.content as any,
+        };
+      return {
+        role: "assistant",
+        content: m.content as string,
+      };
+    }),
+    { role: "user", content: query as any },
   ];
 
-  try {
-    const stream = await groq.chat.completions.create({
+  // Typecast the creation to tell TS we are explicitly requesting a string stream
+  const createStream = () =>
+    groq.chat.completions.create({
       messages,
       model: model || "llama3-70b-8192",
       temperature: 0.3,
       max_tokens: 4096,
       top_p: 0.9,
       stream: true,
-    });
+    }) as any;
 
-    for await (const chunk of stream) {
-      const token = chunk.choices[0]?.delta?.content || "";
-      if (token) {
-        onToken(token);
-      }
+  const stream: any = await withRetry(createStream, {
+    maxRetries: 2,
+    baseDelayMs: 500,
+    shouldRetry: (err) => isRetryableError(err),
+  });
+
+  for await (const chunk of stream) {
+    const token = chunk.choices?.[0]?.delta?.content || "";
+    if (token) {
+      onToken(token);
     }
-
-    onDone();
-  } catch (error: any) {
-    console.error("Groq Streaming Error:", error);
-    throw new Error("Gagal melakukan streaming dari model AI.");
   }
+
+  onDone();
 };

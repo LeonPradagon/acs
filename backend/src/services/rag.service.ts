@@ -1,4 +1,5 @@
 import { prisma, esClient } from "../config/db";
+import { EmbeddingService } from "./embedding.service";
 
 export interface RagContext {
   content: string;
@@ -64,7 +65,6 @@ const STOPWORDS = new Set([
   "can",
   "a",
   "an",
-  "the",
   "and",
   "but",
   "or",
@@ -144,8 +144,10 @@ function extractKeywords(query: string): string[] {
 }
 
 /**
- * Searches for relevant context using Elasticsearch (keyword + fuzzy)
- * with a PostgreSQL fallback using all meaningful query words.
+ * Searches for relevant context using Hybrid Search:
+ * 1. Elasticsearch kNN (Semantic/Vector)
+ * 2. Elasticsearch BM25 (Keyword)
+ * with a PostgreSQL fallback.
  */
 export const retrieveContext = async (query: string): Promise<RagContext[]> => {
   let contexts: RagContext[] = [];
@@ -156,53 +158,68 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
     queryLower.includes(kw.toLowerCase()),
   );
 
-  // 2. Proactive: Get very recent documents (last 5 minutes)
+  // 2. Proactive: Get very recent documents (only if relevant)
   let recentDocs: any[] = [];
-  try {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    recentDocs = await prisma.document.findMany({
-      where: {
-        createdAt: { gte: fiveMinutesAgo },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 10,
-    });
-  } catch (err) {
-    console.warn("[RAG] Failed to fetch very recent docs:", err);
+  if (isAskingAboutRecent) {
+    try {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      recentDocs = await prisma.document.findMany({
+        where: {
+          createdAt: { gte: fiveMinutesAgo },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      });
+    } catch (err) {
+      console.warn("[RAG] Failed to fetch very recent docs:", err);
+    }
   }
 
-  // 3. Search Elasticsearch
+  // 3. Hybrid Search in Elasticsearch
   try {
+    const queryVector = await EmbeddingService.generateEmbedding(query);
+
     const esResponse = await esClient.search({
       index: "documents",
+      knn: {
+        field: "embedding",
+        query_vector: queryVector,
+        k: 10,
+        num_candidates: 100,
+      },
       query: {
-        multi_match: {
-          query: query,
-          fields: ["content", "title"],
-          fuzziness: "AUTO",
+        bool: {
+          should: [
+            {
+              multi_match: {
+                query: query,
+                fields: ["content^2", "title"],
+                fuzziness: "AUTO",
+              },
+            },
+          ],
         },
       },
-      size: 5,
+      size: 10,
     });
 
     if (esResponse.hits.hits.length > 0) {
       esResponse.hits.hits.forEach((hit: any) => {
         const source: any = hit._source;
         if (source && source.content) {
-          contexts.push({
-            content: source.content,
-            source: source.title || source.filename || "Elasticsearch Document",
-            score: hit._score || 0,
-          });
+          if (!contexts.some((c) => c.content === source.content)) {
+            contexts.push({
+              content: source.content,
+              source:
+                source.title || source.filename || "Elasticsearch Document",
+              score: hit._score || 0,
+            });
+          }
         }
       });
     }
   } catch (error: any) {
-    if (error.name !== "ResponseError" || error.meta?.statusCode !== 404) {
-      console.warn(
-        "[RAG] Elasticsearch query failed. Falling back to PostgreSQL.",
-      );
-    }
+    console.warn("[RAG] Hybrid search failed:", error.message);
   }
 
   // 4. PostgreSQL Keyword Fallback (if ES is sparse)
@@ -220,7 +237,6 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
         });
 
         pgDocs.forEach((doc) => {
-          // Avoid duplicates
           if (!contexts.some((c) => c.content === doc.content)) {
             contexts.push({
               content: doc.content,
@@ -235,24 +251,21 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
     }
   }
 
-  // 5. Integration: Merge Recent Docs if user is asking about them OR if context is still sparse
+  // 5. Integration: Merge Recent Docs if user is asking about them
   if (recentDocs.length > 0) {
     recentDocs.forEach((doc) => {
-      // Check if already in contexts to avoid duplicates
       const exists = contexts.some(
         (c) => c.content === doc.content || c.source === doc.title,
       );
 
       if (!exists) {
         if (isAskingAboutRecent) {
-          // Priority: Add to the beginning if asking about recent
           contexts.unshift({
             content: doc.content,
             source: doc.title,
-            score: 0.95, // High score for better accuracy/priority
+            score: 0.95,
           });
         } else if (contexts.length < 2) {
-          // Supplemental: Add if context is empty/sparse
           contexts.push({
             content: doc.content,
             source: doc.title,
@@ -264,7 +277,6 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
   }
 
   // 6. Safety Fallback: If still no context, force include the absolute latest documents
-  // even if they don't explicitly match keywords, to catch "just uploaded" files.
   if (contexts.length === 0 && recentDocs.length > 0) {
     recentDocs.slice(0, 3).forEach((doc) => {
       contexts.push({
@@ -275,5 +287,5 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
     });
   }
 
-  return contexts.slice(0, 5); // Keep top 5 most relevant/recent
+  return contexts.slice(0, 5);
 };

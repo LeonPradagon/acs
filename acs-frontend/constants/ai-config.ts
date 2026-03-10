@@ -24,6 +24,7 @@ import {
   FileText,
   Database,
   Zap,
+  ImageIcon,
 } from "lucide-react";
 
 export const AI_PERSONAS = {
@@ -72,6 +73,12 @@ export const AVAILABLE_MODELS = {
       "Model open source dengan kecepatan tinggi dan reasoning yang excellent",
     icon: Rocket,
     color: "bg-purple-100 text-purple-700 border-purple-200",
+  },
+  "llama-3.2-90b-vision-preview": {
+    name: "Llama 3.2 Vision",
+    description: "Model canggih dengan kemampuan analisis gambar (Multimodal)",
+    icon: ImageIcon,
+    color: "bg-blue-100 text-blue-700 border-blue-200",
   },
 };
 

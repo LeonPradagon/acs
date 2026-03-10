@@ -12,6 +12,7 @@ model User {
   email     String   @unique
   password  String
   name      String?
+  role      String   @default("user")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -24,6 +25,7 @@ model Document {
   classification String?
   tags           String[]
   metadata       Json?
+  status         String   @default("COMPLETED") // PENDING, PROCESSING, COMPLETED, FAILED
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }

@@ -18,6 +18,10 @@ export const useChat = (options: UseChatOptions = {}) => {
   const [apiStatus, setApiStatus] = useState<"idle" | "connected" | "error">(
     "idle",
   );
+  const [processingSteps, setProcessingSteps] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>(
+    options.selectedModel || "openai/gpt-oss-120b",
+  );
 
   // Session Management State
   const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
@@ -335,8 +339,13 @@ export const useChat = (options: UseChatOptions = {}) => {
     _ontologyOptions: any,
     existingHistory?: ChatMessage[],
     files?: any[],
+    modelOverride?: string,
+    images?: string[],
   ) => {
-    if (!userQuery.trim() || isProcessing) return;
+    if (!userQuery.trim() && !(images && images.length > 0)) return;
+    if (isProcessing) return;
+
+    const activeModel = modelOverride || selectedModel;
 
     let activeSessionId = currentSessionId;
 
@@ -360,12 +369,14 @@ export const useChat = (options: UseChatOptions = {}) => {
         role: "user",
         timestamp: new Date(),
         files: files && files.length > 0 ? files : undefined,
+        images: images && images.length > 0 ? images : undefined,
       };
       setChatHistory((prev) => [...prev, userMessage]);
     }
 
     setIsProcessing(true);
     setStreamingContent("");
+    setProcessingSteps([]);
     setError("");
     setQuery("");
 
@@ -377,10 +388,24 @@ export const useChat = (options: UseChatOptions = {}) => {
       // Build conversation history for memory (exclude welcome message)
       const historyForAPI = currentHistory
         .filter((m) => m.id !== "welcome" && m.id !== "cleared")
-        .map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
+        .map((m) => {
+          if (m.images && m.images.length > 0) {
+            return {
+              role: m.role,
+              content: [
+                { type: "text", text: m.content },
+                ...m.images.map((img) => ({
+                  type: "image_url",
+                  image_url: { url: img },
+                })),
+              ],
+            };
+          }
+          return {
+            role: m.role,
+            content: m.content,
+          };
+        });
 
       // Use streaming + link to session
       const result = await aiQueryService.processQuery(
@@ -389,9 +414,13 @@ export const useChat = (options: UseChatOptions = {}) => {
         (token: string) => {
           setStreamingContent((prev) => prev + token);
         },
+        (step: string) => {
+          setProcessingSteps((prev) => [...prev, step]);
+        },
         activeSessionId || undefined,
         controller.signal,
         files,
+        activeModel,
       );
 
       setChatHistory((prev) => [...prev, result]);
@@ -443,6 +472,9 @@ export const useChat = (options: UseChatOptions = {}) => {
     setError,
     apiStatus,
     setApiStatus,
+    processingSteps,
+    selectedModel,
+    setSelectedModel,
     messagesEndRef,
     textareaRef,
     clearChat,

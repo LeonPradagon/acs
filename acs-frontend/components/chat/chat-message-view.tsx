@@ -253,6 +253,22 @@ export const ChatMessageView = ({
                     ))}
                   </div>
                 )}
+                {message.images && message.images.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {message.images.map((imgBase64, idx) => (
+                      <div
+                        key={idx}
+                        className="relative w-32 h-32 rounded-lg overflow-hidden border border-border/50 shadow-sm cursor-pointer group bg-black/5"
+                      >
+                        <img
+                          src={imgBase64}
+                          alt={`Uploaded attachment ${idx}`}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

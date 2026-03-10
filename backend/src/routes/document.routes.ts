@@ -37,7 +37,9 @@ const upload = multer({
     if (allowedTypes.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error("Only .pdf and .txt files are allowed"));
+      cb(
+        new Error("Only .pdf, .txt, .docx, .csv, and .xlsx files are allowed"),
+      );
     }
   },
 });

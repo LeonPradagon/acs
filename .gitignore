@@ -1,0 +1,11 @@
+# Root Level Ignore
+*.log
+.env
+.env.*
+node_modules/
+.DS_Store
+
+# IDE and OS files
+.vscode/
+.idea/
+Thumbs.db

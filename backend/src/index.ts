@@ -1,21 +1,34 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
+import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import { v4 as uuidv4 } from "uuid";
 import chatRoutes from "./routes/chat.routes";
 import authRoutes from "./routes/auth.routes";
 import documentRoutes from "./routes/document.routes";
-import { testConnections } from "./config/db";
+import healthRoutes from "./routes/health.routes";
+import { prisma, esClient, testConnections } from "./config/db";
+import { redisConnection } from "./config/redis";
+import { documentWorker } from "./workers/document.worker";
+import { errorMiddleware } from "./middleware/error.middleware";
+import { env } from "./common/env";
 
-dotenv.config();
+// Initialize BullMQ Worker
+import "./workers/document.worker";
 
 const app = express();
-const port = process.env.PORT || 3002;
 
-// Middleware
+// ============================================================
+// Security Middleware
+// ============================================================
+
+// Helmet — set secure HTTP headers
+app.use(helmet());
+
+// CORS — use env-based origins instead of wildcard
 app.use(
   cors({
-    origin: "*",
+    origin: env.ALLOWED_ORIGINS,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
@@ -26,7 +39,22 @@ app.use(
     credentials: true,
   }),
 );
+
 app.use(express.json({ limit: "1mb" }));
+
+// ============================================================
+// Request ID Middleware
+// ============================================================
+app.use((req, res, next) => {
+  const requestId = uuidv4();
+  (req as any).id = requestId;
+  res.setHeader("X-Request-Id", requestId);
+  next();
+});
+
+// ============================================================
+// Rate Limiting
+// ============================================================
 
 // Global Rate Limiter — 100 requests per 15 minutes per IP
 const globalLimiter = rateLimit({
@@ -53,19 +81,57 @@ const chatLimiter = rateLimit({
 
 app.use(globalLimiter);
 
-// Main Routes
+// ============================================================
+// Routes
+// ============================================================
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatLimiter, chatRoutes);
 app.use("/api/rag", documentRoutes);
+app.use("/api/health", healthRoutes);
 
-// General 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: "Endpoint not found" });
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Universal AI Chat Backend running on port ${port}`);
+// Global Error Handler
+app.use(errorMiddleware);
 
-  // Test Database Connections on startup
+// ============================================================
+// Server Startup
+// ============================================================
+app.listen(env.PORT, () => {
+  console.log(`🚀 Universal AI Chat Backend running on port ${env.PORT}`);
   testConnections();
 });
+
+// ============================================================
+// Graceful Shutdown — close ALL connections
+// ============================================================
+const shutdown = async (signal: string) => {
+  console.log(`\n[${signal}] Shutting down gracefully...`);
+  try {
+    // Close BullMQ worker
+    await documentWorker.close();
+    console.log("✔ BullMQ Worker closed.");
+
+    // Close database connections
+    await prisma.$disconnect();
+    console.log("✔ PostgreSQL disconnected.");
+
+    // Close Elasticsearch
+    await esClient.close();
+    console.log("✔ Elasticsearch disconnected.");
+
+    // Close Redis
+    await redisConnection.quit();
+    console.log("✔ Redis disconnected.");
+
+    process.exit(0);
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+    process.exit(1);
+  }
+};
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

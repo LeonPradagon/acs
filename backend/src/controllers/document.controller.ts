@@ -1,12 +1,10 @@
 import { Request, Response } from "express";
-import { prisma, esClient } from "../config/db";
-import fs from "fs";
-import path from "path";
-import { DocumentExtractorService } from "../services/document-extractor.service";
+import { prisma } from "../config/db";
+import { documentQueue } from "../config/queue";
 
 /**
- * Handle multiple document uploads with PostgreSQL storage and Elasticsearch indexing.
- * Includes PDF text extraction to avoid UTF-8 encoding errors.
+ * Handle multiple document uploads with PostgreSQL storage and BullMQ queueing.
+ * Defers PDF text extraction and Semantic Search (Vector) indexing to background workers.
  */
 export const uploadDocuments = async (req: Request, res: Response) => {
   try {
@@ -31,29 +29,15 @@ export const uploadDocuments = async (req: Request, res: Response) => {
 
     const savedDocuments = [];
     for (const file of files) {
-      let content = "";
-
-      try {
-        content = await DocumentExtractorService.extractHybrid(
-          file.path,
-          file.mimetype,
-        );
-      } catch (extractError: any) {
-        console.error(
-          `Failed to extract text from ${file.originalname}:`,
-          extractError,
-        );
-        content = `[Content extraction failed for ${file.originalname}]`;
-      }
-
-      // 1. Save to PostgreSQL via Prisma
-      const doc = (await prisma.document.create({
+      // 1. Save to PostgreSQL via Prisma with PENDING status
+      const doc = await prisma.document.create({
         data: {
           title: file.originalname,
-          content: content,
+          content: "", // Empty for now, filled by worker
           category: metadata.category || "General",
           classification: metadata.classification || "Unclassified",
           tags: Array.isArray(metadata.tags) ? metadata.tags : [],
+          status: "PENDING",
           metadata: {
             filename: file.filename,
             mimetype: file.mimetype,
@@ -62,38 +46,24 @@ export const uploadDocuments = async (req: Request, res: Response) => {
             ...metadata,
           },
         } as any,
-      })) as any;
+      });
 
-      // 2. Index to Elasticsearch for accurate RAG retrieval
-      try {
-        await esClient.index({
-          index: "documents",
-          id: doc.id,
-          refresh: true,
-          document: {
-            title: doc.title,
-            content: doc.content,
-            category: doc.category,
-            classification: doc.classification,
-            tags: doc.tags,
-            database_id: doc.id,
-            timestamp: new Date(),
-          },
-        });
-        console.log(
-          `✅ Indexed document ${doc.id} to Elasticsearch (refreshed)`,
-        );
-      } catch (esError) {
-        console.error(`❌ Failed to index document ${doc.id} to ES:`, esError);
-      }
+      // 2. Add Job to Queue
+      await documentQueue.add("extract-document", {
+        documentId: doc.id,
+        filePath: file.path,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+      });
 
       savedDocuments.push(doc);
     }
 
-    return res.status(200).json({
+    return res.status(202).json({
       success: true,
+      message: "Documents are being processed in the background.",
       data: {
-        successful: savedDocuments.length,
+        queued: savedDocuments.length,
         documents: savedDocuments,
       },
     });
