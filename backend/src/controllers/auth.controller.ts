@@ -30,7 +30,7 @@ export const register = async (req: Request, res: Response) => {
 
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role, type: "refresh" },
-      env.JWT_SECRET,
+      env.JWT_REFRESH_SECRET,
       { expiresIn: "7d" },
     );
 
@@ -80,7 +80,7 @@ export const login = async (req: Request, res: Response) => {
 
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role, type: "refresh" },
-      env.JWT_SECRET,
+      env.JWT_REFRESH_SECRET,
       { expiresIn: "7d" },
     );
 
@@ -121,12 +121,20 @@ export const verifyToken = async (req: any, res: Response) => {
         .json({ success: false, message: "User not found" });
     }
 
+    // Calculate real remaining time from the JWT itself
+    const tokenExp = req.user.exp; // JWT exp is in seconds
+    const nowSec = Math.floor(Date.now() / 1000);
+    const remainingTime = tokenExp ? Math.max(0, tokenExp - nowSec) : 0;
+    const isExpiringSoon = remainingTime < 10 * 60; // less than 10 minutes
+
     res.status(200).json({
       success: true,
       data: {
-        remainingTime: 7 * 24 * 60 * 60,
-        isExpiringSoon: false,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        remainingTime,
+        isExpiringSoon,
+        expiresAt: tokenExp
+          ? new Date(tokenExp * 1000).toISOString()
+          : new Date().toISOString(),
         user: {
           id: user.id,
           email: user.email,
@@ -147,7 +155,7 @@ export const refreshToken = async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: "Token required" });
 
   try {
-    const decoded: any = jwt.verify(incomingToken, env.JWT_SECRET);
+    const decoded: any = jwt.verify(incomingToken, env.JWT_REFRESH_SECRET);
     
     // Explicitly reject access tokens when refreshing
     if (decoded.type === "access") {

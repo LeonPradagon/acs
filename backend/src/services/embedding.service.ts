@@ -72,6 +72,18 @@ export class EmbeddingService {
         reject(err);
       });
 
+      this.worker.on("exit", (code) => {
+        if (code !== 0) {
+          console.error(`[Embedding Worker] Exited with code ${code}. Rejecting all pending requests.`);
+          const exitError = new Error(`Embedding worker exited unexpectedly with code ${code}`);
+          this.pendingRequests.forEach((req) => req.reject(exitError));
+          this.pendingRequests.clear();
+          this.worker = null;
+          this.isInitialized = false;
+          this.initPromise = null;
+        }
+      });
+
       this.worker.postMessage({ type: "INIT" });
     });
 

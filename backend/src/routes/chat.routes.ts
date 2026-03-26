@@ -6,6 +6,8 @@ import {
   renameSession,
   deleteSession,
   getChatHistory,
+  deleteAllSessions,
+  searchChatHistory,
 } from "../controllers/session.controller";
 import {
   submitFeedback,
@@ -32,9 +34,11 @@ router.patch(
   renameSession,
 );
 router.delete("/sessions/:sessionId", authenticateToken, deleteSession);
+router.delete("/sessions", authenticateToken, deleteAllSessions);
 
 // Chat History
 router.get("/history/:sessionId", authenticateToken, getChatHistory);
+router.get("/search", authenticateToken, searchChatHistory);
 
 // Chat Endpoints (with Zod validation)
 router.post(

@@ -34,6 +34,9 @@ export const useChat = (options: UseChatOptions = {}) => {
   // AbortController for stop generation
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Stable ref to always access the latest handleProcess
+  const handleProcessRef = useRef<typeof handleProcess>(null as any);
+
   // Function to load all sessions
   const loadSessionsList = useCallback(async () => {
     try {
@@ -229,8 +232,8 @@ export const useChat = (options: UseChatOptions = {}) => {
     const newHistory = chatHistory.slice(0, actualIndex + 1);
     setChatHistory(newHistory);
 
-    // Re-send the query
-    handleProcess(
+    // Re-send the query via ref to avoid stale closure
+    handleProcessRef.current(
       lastUserMessage.content,
       "universal",
       "universal",
@@ -322,8 +325,8 @@ export const useChat = (options: UseChatOptions = {}) => {
       const updatedHistory = [...newHistory, editedMessage];
       setChatHistory(updatedHistory);
 
-      // Re-process with the edited query
-      handleProcess(
+      // Re-process with the edited query via ref to avoid stale closure
+      handleProcessRef.current(
         newContent,
         "universal",
         "universal",
@@ -339,6 +342,7 @@ export const useChat = (options: UseChatOptions = {}) => {
    * Process a user message with streaming response
    */
   const handleProcess = async (
+    // Keep ref in sync for stale-closure-safe access
     userQuery: string,
     _mode: string,
     _persona: string,
@@ -467,6 +471,9 @@ export const useChat = (options: UseChatOptions = {}) => {
       abortControllerRef.current = null;
     }
   };
+
+  // Keep ref in sync so callbacks always call the latest version
+  handleProcessRef.current = handleProcess;
 
   return {
     chatHistory,

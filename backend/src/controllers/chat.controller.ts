@@ -46,6 +46,22 @@ function shouldSkipRAG(query: string): boolean {
 }
 
 // ============================================================
+// Helper: Build conversation history for LLM context
+// ============================================================
+function buildConversationHistory(
+  messages: any[],
+  limit: number = 20,
+): { role: "user" | "assistant"; content: string }[] {
+  return messages
+    .filter((m: any) => m.role === "user" || m.role === "assistant")
+    .slice(-limit)
+    .map((m: any) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+}
+
+// ============================================================
 // Streaming Chat Endpoint (SSE)
 // ============================================================
 
@@ -154,13 +170,7 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
     }
 
     // 2. Build history
-    const conversationHistory = messages
-      .filter((m: any) => m.role === "user" || m.role === "assistant")
-      .slice(-20)
-      .map((m: any) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+    const conversationHistory = buildConversationHistory(messages);
 
     // Send sources first
     if (!isClientDisconnected) {
@@ -267,13 +277,7 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
       contexts = await retrieveContext(question, req.user?.userId);
     }
 
-    const conversationHistory = messages
-      .filter((m: any) => m.role === "user" || m.role === "assistant")
-      .slice(-20)
-      .map((m: any) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+    const conversationHistory = buildConversationHistory(messages);
 
     const responseData = await getUniversalResponse(
       question,

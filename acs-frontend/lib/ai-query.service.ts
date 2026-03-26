@@ -28,6 +28,16 @@ export const deleteSession = async (sessionId: string): Promise<void> => {
   await apiClient.delete(`/api/chat/sessions/${sessionId}`);
 };
 
+export const deleteAllSessions = async (): Promise<{ deleted: number }> => {
+  const res = await apiClient.delete("/api/chat/sessions");
+  return res.data.data;
+};
+
+export const searchChatHistory = async (query: string): Promise<any[]> => {
+  const res = await apiClient.get(`/api/chat/search?q=${encodeURIComponent(query)}`);
+  return res.data.data || [];
+};
+
 export const loadSessionHistory = async (
   sessionId: string,
 ): Promise<ChatMessage[]> => {
@@ -258,6 +268,8 @@ export const aiQueryService = {
   createSession,
   renameSession,
   deleteSession,
+  deleteAllSessions,
+  searchChatHistory,
   loadSessionHistory,
   submitFeedback,
 };

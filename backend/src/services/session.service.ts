@@ -5,27 +5,44 @@ export class SessionService {
   /**
    * List all chat sessions for a user, ordered by most recent.
    */
-  static async listSessions(userId?: string) {
+  static async listSessions(userId?: string, page: number = 1, limit: number = 20) {
     if (!userId) {
       throw new ForbiddenError("User ID is required to list sessions");
     }
+
+    const skip = (page - 1) * limit;
     
-    return prisma.chatSession.findMany({
-      where: { userId },
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        createdAt: true,
-        updatedAt: true,
-        messages: {
-          take: 1,
-          orderBy: { createdAt: "asc" },
-          where: { role: "user" },
-          select: { content: true },
+    const [sessions, total] = await Promise.all([
+      prisma.chatSession.findMany({
+        where: { userId },
+        orderBy: { updatedAt: "desc" },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          title: true,
+          createdAt: true,
+          updatedAt: true,
+          messages: {
+            take: 1,
+            orderBy: { createdAt: "asc" },
+            where: { role: "user" },
+            select: { content: true },
+          },
         },
+      }),
+      prisma.chatSession.count({ where: { userId } }),
+    ]);
+
+    return {
+      sessions,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   /**
@@ -124,5 +141,56 @@ export class SessionService {
     } else {
       await this.touchSession(sessionId);
     }
+  }
+
+  /**
+   * Delete ALL sessions for a user (bulk clear).
+   */
+  static async deleteAllSessions(userId?: string) {
+    if (!userId) {
+      throw new ForbiddenError("User ID is required to delete sessions");
+    }
+
+    const result = await prisma.chatSession.deleteMany({
+      where: { userId },
+    });
+
+    return { deleted: result.count };
+  }
+
+  /**
+   * Search across all chat messages for a user.
+   */
+  static async searchChatHistory(userId?: string, query?: string) {
+    if (!userId) {
+      throw new ForbiddenError("User ID is required to search");
+    }
+    if (!query || query.trim().length < 2) {
+      throw new ForbiddenError("Search query must be at least 2 characters");
+    }
+
+    const messages = await prisma.chatHistory.findMany({
+      where: {
+        session: { userId },
+        content: {
+          contains: query.trim(),
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+        role: true,
+        content: true,
+        createdAt: true,
+        sessionId: true,
+        session: {
+          select: { title: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    });
+
+    return messages;
   }
 }

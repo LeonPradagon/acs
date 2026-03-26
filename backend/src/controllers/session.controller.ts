@@ -4,107 +4,90 @@ import { SessionService } from "../services/session.service";
 import { AppError } from "../common/errors";
 
 /**
+ * Async handler wrapper — eliminates repetitive try/catch + AppError handling.
+ */
+function asyncHandler(fn: (req: AuthRequest, res: Response) => Promise<void>) {
+  return async (req: AuthRequest, res: Response) => {
+    try {
+      await fn(req, res);
+    } catch (error: any) {
+      if (error instanceof AppError) {
+        return res
+          .status(error.statusCode)
+          .json({ success: false, error: error.message });
+      }
+      console.error(`[Sessions] Error:`, error);
+      res.status(500).json({ success: false, error: error.message || "Internal server error" });
+    }
+  };
+}
+
+/**
  * List all chat sessions for the authenticated user.
  */
-export const listSessions = async (req: AuthRequest, res: Response) => {
-  try {
-    const sessions = await SessionService.listSessions(req.user?.userId);
-    res.status(200).json({ success: true, data: sessions });
-  } catch (error: any) {
-    if (error instanceof AppError) {
-      return res
-        .status(error.statusCode)
-        .json({ success: false, error: error.message });
-    }
-    console.error("[Sessions] List error:", error);
-    res.status(500).json({ success: false, error: "Failed to load sessions" });
-  }
-};
+export const listSessions = asyncHandler(async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page as string) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 20));
+  const result = await SessionService.listSessions(req.user?.userId, page, limit);
+  res.status(200).json({ success: true, data: result.sessions, pagination: result.pagination });
+});
 
 /**
  * Create a new chat session linked to the authenticated user.
  */
-export const createSession = async (req: AuthRequest, res: Response) => {
-  try {
-    const session = await SessionService.createSession(req.user?.userId);
-    res.status(201).json({ success: true, data: session });
-  } catch (error: any) {
-    if (error instanceof AppError) {
-      return res
-        .status(error.statusCode)
-        .json({ success: false, error: error.message });
-    }
-    console.error("[Sessions] Create error:", error);
-    res.status(500).json({ success: false, error: "Failed to create session" });
-  }
-};
+export const createSession = asyncHandler(async (req, res) => {
+  const session = await SessionService.createSession(req.user?.userId);
+  res.status(201).json({ success: true, data: session });
+});
 
 /**
  * Rename a chat session (validated by Zod middleware).
  */
-export const renameSession = async (req: AuthRequest, res: Response) => {
+export const renameSession = asyncHandler(async (req, res) => {
   const { sessionId } = req.params;
   const { title } = req.body;
-
-  try {
-    const updated = await SessionService.renameSession(
-      sessionId,
-      title,
-      req.user?.userId,
-    );
-    res.status(200).json({ success: true, data: updated });
-  } catch (error: any) {
-    if (error instanceof AppError) {
-      return res
-        .status(error.statusCode)
-        .json({ success: false, error: error.message });
-    }
-    console.error("[Sessions] Rename error:", error);
-    res.status(500).json({ success: false, error: "Failed to rename session" });
-  }
-};
+  const updated = await SessionService.renameSession(
+    sessionId,
+    title,
+    req.user?.userId,
+  );
+  res.status(200).json({ success: true, data: updated });
+});
 
 /**
  * Delete a chat session (only if owned by user).
  */
-export const deleteSession = async (req: AuthRequest, res: Response) => {
+export const deleteSession = asyncHandler(async (req, res) => {
   const { sessionId } = req.params;
-
-  try {
-    await SessionService.deleteSession(sessionId, req.user?.userId);
-    res.status(200).json({ success: true });
-  } catch (error: any) {
-    if (error instanceof AppError) {
-      return res
-        .status(error.statusCode)
-        .json({ success: false, error: error.message });
-    }
-    console.error("[Sessions] Delete error:", error);
-    res.status(500).json({ success: false, error: "Failed to delete session" });
-  }
-};
+  await SessionService.deleteSession(sessionId, req.user?.userId);
+  res.status(200).json({ success: true });
+});
 
 /**
  * Load chat history for a session (with ownership check).
  */
-export const getChatHistory = async (req: AuthRequest, res: Response) => {
+export const getChatHistory = asyncHandler(async (req, res) => {
   const { sessionId } = req.params;
+  const history = await SessionService.getChatHistory(
+    sessionId,
+    req.user?.userId,
+  );
+  res.status(200).json({ success: true, data: history });
+});
 
-  try {
-    const history = await SessionService.getChatHistory(
-      sessionId,
-      req.user?.userId,
-    );
-    res.status(200).json({ success: true, data: history });
-  } catch (error: any) {
-    if (error instanceof AppError) {
-      return res
-        .status(error.statusCode)
-        .json({ success: false, error: error.message });
-    }
-    console.error("[Chat] History error:", error);
-    res
-      .status(500)
-      .json({ success: false, error: "Failed to load chat history" });
-  }
-};
+/**
+ * Delete ALL sessions for the authenticated user (bulk clear).
+ */
+export const deleteAllSessions = asyncHandler(async (req, res) => {
+  const result = await SessionService.deleteAllSessions(req.user?.userId);
+  res.status(200).json({ success: true, data: result });
+});
+
+/**
+ * Search chat history across all sessions.
+ */
+export const searchChatHistory = asyncHandler(async (req, res) => {
+  const query = req.query.q as string;
+  const results = await SessionService.searchChatHistory(req.user?.userId, query);
+  res.status(200).json({ success: true, data: results });
+});

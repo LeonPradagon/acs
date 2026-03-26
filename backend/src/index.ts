@@ -12,6 +12,7 @@ import { prisma, esClient, testConnections } from "./config/db";
 import { redisConnection } from "./config/redis";
 import { documentWorker } from "./workers/document.worker";
 import { errorMiddleware } from "./middleware/error.middleware";
+import { requestLogger } from "./middleware/logger.middleware";
 import { env } from "./common/env";
 import { EmbeddingService } from "./services/embedding.service";
 
@@ -53,6 +54,9 @@ app.use((req, res, next) => {
   res.setHeader("X-Request-Id", requestId);
   next();
 });
+
+// Request Logger — log after request ID is assigned
+app.use(requestLogger);
 
 // ============================================================
 // Rate Limiting

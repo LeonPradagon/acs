@@ -27,6 +27,7 @@ export const env = {
 
   // Security
   JWT_SECRET: requireEnv("JWT_SECRET"),
+  JWT_REFRESH_SECRET: optionalEnv("JWT_REFRESH_SECRET", process.env.JWT_SECRET || ""),
   ALLOWED_ORIGINS: optionalEnv("ALLOWED_ORIGINS", "http://localhost:3000")
     .split(",")
     .map((s) => s.trim()),

@@ -66,6 +66,7 @@ ${contextString}
  */
 function isRetryableError(error: any): boolean {
   if (error?.name === "AbortError") return false;
+  if (error?.status === 429) return true; // Rate limit → retryable
   if (error?.status && error.status >= 400 && error.status < 500) return false;
   return true;
 }
