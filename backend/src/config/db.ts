@@ -15,6 +15,57 @@ const esClient = new Client({
 
 export { prisma, esClient };
 
+// Track pgvector availability at runtime
+export let pgVectorAvailable = false;
+
+/**
+ * Setup pgvector extension and vector column on DocumentChunk.
+ * This runs at startup and gracefully degrades if pgvector is not installed.
+ */
+export const setupPgVector = async () => {
+  try {
+    // 1. Try to enable the pgvector extension
+    await prisma.$executeRawUnsafe(`CREATE EXTENSION IF NOT EXISTS vector`);
+
+    // 2. Check if embedding column already exists on DocumentChunk
+    const columns: any[] = await prisma.$queryRaw`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'DocumentChunk' AND column_name = 'embedding'
+    `;
+
+    if (columns.length === 0) {
+      // Add vector column (384 dimensions for all-MiniLM-L6-v2)
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "DocumentChunk" ADD COLUMN "embedding" vector(384)`,
+      );
+      console.log("[pgvector] Added embedding column to DocumentChunk");
+    }
+
+    // 3. Check if HNSW index exists
+    const indexes: any[] = await prisma.$queryRaw`
+      SELECT indexname FROM pg_indexes
+      WHERE tablename = 'DocumentChunk' AND indexname = 'DocumentChunk_embedding_idx'
+    `;
+
+    if (indexes.length === 0) {
+      await prisma.$executeRawUnsafe(
+        `CREATE INDEX "DocumentChunk_embedding_idx" ON "DocumentChunk"
+         USING hnsw ("embedding" vector_cosine_ops)`,
+      );
+      console.log("[pgvector] Created HNSW index on DocumentChunk.embedding");
+    }
+
+    pgVectorAvailable = true;
+    console.log("✅ pgvector is available and configured");
+  } catch (err: any) {
+    pgVectorAvailable = false;
+    console.warn(
+      "⚠️ pgvector setup failed. PostgreSQL vector search will be unavailable.",
+      err.message,
+    );
+  }
+};
+
 export const setupIndices = async () => {
   try {
     const indexName = "documents";
@@ -55,6 +106,9 @@ export const testConnections = async () => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     console.log("✅ Prisma (PostgreSQL) connected successfully");
+
+    // Setup pgvector extension and vector column
+    await setupPgVector();
 
     try {
       const esRes = await esClient.info();

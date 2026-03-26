@@ -7,7 +7,7 @@ import { ZodError } from "zod";
  * Handles AppError subclasses, ZodError, and generic errors.
  */
 export const errorMiddleware = (
-  err: any,
+  err: Error | AppError | ZodError | any,
   req: Request,
   res: Response,
   next: NextFunction,
@@ -34,10 +34,10 @@ export const errorMiddleware = (
   }
 
   // Handle generic errors
-  const statusCode = err.status || 500;
+  const statusCode = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
 
-  console.error(`[Error] ${req.method} ${req.path}:`, err);
+  console.error(`[Error ${statusCode}] ${req.method} ${req.path}:`, err);
 
   res.status(statusCode).json({
     success: false,

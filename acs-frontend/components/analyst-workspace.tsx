@@ -38,9 +38,9 @@ export function AnalystWorkspace() {
     <div className="h-screen bg-background overflow-hidden font-sans">
       <AIQueryInput
         className="h-full w-full"
+        handleLogout={session.handleLogout}
         workspaceHeader={
           <WorkspaceHeader
-            handleLogout={session.handleLogout}
             currentTime={currentTime}
           />
         }

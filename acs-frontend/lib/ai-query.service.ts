@@ -45,8 +45,8 @@ export const loadSessionHistory = async (
 
 export const checkHealth = async (): Promise<boolean> => {
   try {
-    const res = await apiClient.get("/api/chat/health");
-    return res.data?.status === "healthy";
+    const res = await apiClient.get("/api/health");
+    return res.data?.status === "UP";
   } catch {
     return false;
   }

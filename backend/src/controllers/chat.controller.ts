@@ -7,6 +7,8 @@ import {
 import { AuthRequest } from "../middleware/auth.middleware";
 import { ChatService } from "../services/chat.service";
 import { SessionService } from "../services/session.service";
+import { OnyxService } from "../services/onyx.service";
+import { prisma } from "../config/db";
 
 // ============================================================
 // Helper: Query Classification — skip RAG for general questions
@@ -64,12 +66,76 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
   res.flushHeaders();
 
   // Handle client disconnect
+  const abortController = new AbortController();
   let isClientDisconnected = false;
   req.on("close", () => {
     isClientDisconnected = true;
+    abortController.abort();
+    console.log("[StreamChat] Client disconnected, aborting LLM stream...");
   });
 
   try {
+    // === Onyx Integration Branch ===
+    if (OnyxService.isConfigured) {
+      if (!isClientDisconnected) {
+          res.write(`data: ${JSON.stringify({ type: "step", step: "🔄 Menyambungkan ke Onyx Enterprise AI..." })}\n\n`);
+      }
+
+      let onyxSessionId = null;
+      
+      // Attempt to load existing onyxSessionId
+      if (sessionId) {
+          const sessionModel = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+          if (sessionModel?.onyxSessionId) {
+             onyxSessionId = sessionModel.onyxSessionId;
+          } else {
+             // Create a new session in Onyx for this existing ACS ChatSession
+             onyxSessionId = await OnyxService.createSession();
+             await prisma.chatSession.update({
+                 where: { id: sessionId },
+                 data: { onyxSessionId }
+             });
+          }
+      } else {
+          // If the user hasn't saved the chat yet, just create a temporary session
+          onyxSessionId = await OnyxService.createSession();
+      }
+
+      let fullResponse = "";
+      
+      await OnyxService.streamChat(
+          onyxSessionId,
+          question,
+          (token: string) => {
+              if (!isClientDisconnected) {
+                  fullResponse += token;
+                  res.write(`data: ${JSON.stringify({ type: "token", token })}\n\n`);
+              }
+          }
+      );
+
+      if (!isClientDisconnected) {
+          res.write(`data: ${JSON.stringify({ type: "step", step: "✅ Selesai" })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "done", model: "Onyx API backend" })}\n\n`);
+          res.end();
+      }
+
+      // Save to database + auto-title (fire and forget)
+      if (sessionId) {
+          (async () => {
+              try {
+                  await ChatService.saveMessages(sessionId, question, fullResponse, files);
+                  const aiTitle = await ChatService.generateSessionTitle(question, fullResponse);
+                  await SessionService.updateTitleIfDefault(sessionId, aiTitle);
+              } catch (err) {
+                  console.error("[StreamChat Onyx] Error saving history:", err);
+              }
+          })();
+      }
+      return;
+    }
+    // === End Onyx Integration Branch ===
+
     // 1. Query Classification — skip RAG for general knowledge
     if (!isClientDisconnected) {
       res.write(
@@ -81,10 +147,10 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
     if (!shouldSkipRAG(question)) {
       if (!isClientDisconnected) {
         res.write(
-          `data: ${JSON.stringify({ type: "step", step: "📚 Mencari referensi di database internal..." })}\n\n`,
+          `data: ${JSON.stringify({ type: "step", step: "📚 Mencari referensi terisolasi di database..." })}\n\n`,
         );
       }
-      contexts = await retrieveContext(question);
+      contexts = await retrieveContext(question, req.user?.userId);
     }
 
     // 2. Build history
@@ -160,8 +226,13 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
           })();
         }
       },
+      abortController.signal
     );
   } catch (error: any) {
+    if (error.name === "AbortError" || isClientDisconnected) {
+      console.log("[Stream Chat] Request aborted safely.");
+      return;
+    }
     console.error("[Stream Chat] Error:", error);
     if (!isClientDisconnected) {
       res.write(
@@ -193,7 +264,7 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
     // Query Classification
     let contexts: any[] = [];
     if (!shouldSkipRAG(question)) {
-      contexts = await retrieveContext(question);
+      contexts = await retrieveContext(question, req.user?.userId);
     }
 
     const conversationHistory = messages

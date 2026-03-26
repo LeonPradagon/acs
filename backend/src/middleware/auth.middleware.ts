@@ -6,6 +6,7 @@ export interface AuthRequest extends Request {
   user?: {
     userId: string;
     email: string;
+    role: string;
   };
 }
 
@@ -25,6 +26,12 @@ export const authenticateToken = (
     if (err) {
       return res.status(403).json({ error: "Invalid or expired token" });
     }
+    
+    // Prevent refresh tokens from being used for generic access
+    if (decoded?.type === "refresh") {
+      return res.status(403).json({ error: "Refresh token cannot be used to access endpoints" });
+    }
+
     req.user = decoded;
     next();
   });

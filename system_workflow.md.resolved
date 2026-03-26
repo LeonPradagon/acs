@@ -1,6 +1,6 @@
-# Alur Kerja Sistem: ACS Intelligence Assistant
+# Alur Kerja Sistem: ACS Intelligence Assistant (MVP Version)
 
-Dokumen ini menjelaskan **arsitektur** dan **alur kerja** lengkap dari sistem ACS Intelligence Assistant — mulai dari pengguna mengetik pertanyaan hingga jawaban ditampilkan di layar.
+Dokumen ini menjelaskan **arsitektur** dan **alur kerja** sebenarnya dari sistem ACS Intelligence Assistant berdasarkan kode yang telah diimplementasikan saat ini — mulai dari pengguna masuk, mengunggah dokumen, hingga berinteraksi dengan AI.
 
 ---
 
@@ -10,29 +10,31 @@ Dokumen ini menjelaskan **arsitektur** dan **alur kerja** lengkap dari sistem AC
 graph TB
     subgraph FRONTEND["🖥️ Frontend (Next.js)"]
         UI["User Interface"]
-        Hooks["Custom Hooks<br/>(useChat, useRAG)"]
+        Hooks["Custom Hooks<br/>(useChat, useRAG, useSession)"]
         Types["Types (chat.ts)"]
     end
 
     subgraph BACKEND["⚙️ Backend (Express.js)"]
-        MW["Middleware<br/>(Auth + Classification)"]
-        Routes["Routes<br/>(auth, chat, rag)"]
-        Controllers["Controllers<br/>(auth, chat, rag)"]
-        Services["Services Layer<br/>(11 services)"]
+        MW["Middleware<br/>(Auth, Validation, Error)"]
+        Routes["Routes<br/>(auth, chat, document, health)"]
+        Controllers["Controllers<br/>(auth, chat, document, session, feedback)"]
+        Services["Services Layer<br/>(8 core services)"]
     end
 
     subgraph EXTERNAL["🌐 External Services"]
-        Groq["Groq API<br/>(Llama 3.3 70B)"]
-        ES["Elasticsearch<br/>(Vector Search)"]
-        PG["PostgreSQL<br/>(Prisma ORM)"]
+        Groq["Groq API<br/>(gpt-oss-120b)"]
+        PG["PostgreSQL + pgvector<br/>(Prisma ORM)"]
+        Tika["Apache Tika / LlamaParse<br/>(Document Extraction)"]
+        Redis["Redis<br/>(Caching & Session)"]
     end
 
     UI --> Hooks
     Hooks --> Routes
     Routes --> MW --> Controllers --> Services
     Services --> Groq
-    Services --> ES
     Services --> PG
+    Services --> Tika
+    Services --> Redis
 ```
 
 ---
@@ -47,233 +49,158 @@ sequenceDiagram
     participant MW as Auth Middleware
     participant DB as PostgreSQL
 
-    U->>FE: Masukkan username & password
+    U->>FE: Masukkan email & password
     FE->>AUTH: POST /api/auth/login
     AUTH->>DB: Cek kredensial (bcrypt)
     DB-->>AUTH: User data
-    AUTH-->>FE: { accessToken, refreshToken }
-    FE->>FE: Simpan token di localStorage
+    AUTH-->>FE: { accessToken, refreshToken, user }
+    FE->>FE: Simpan kredensial & state
 
-    Note over FE,MW: Setiap request selanjutnya...
+    Note over FE,MW: Setiap request dilindungi...
 
     FE->>MW: Request + Bearer Token
     MW->>MW: Verify JWT
-    MW->>MW: Set req.user & req.classification
+    MW->>MW: Set req.user
     MW-->>FE: ✅ Authorized / ❌ 401
 ```
 
 | Endpoint | Method | Fungsi |
 |---|---|---|
+| `/api/auth/register` | POST | Mendaftarkan akun user baru |
 | `/api/auth/login` | POST | Login, dapat access & refresh token |
-| `/api/auth/refresh` | POST | Refresh access token |
-| `/api/auth/profile` | GET | Ambil data user saat ini |
-| `/api/auth/logout` | POST | Logout + blacklist token |
-| `/api/auth/verify` | GET | Verifikasi validitas token |
-| `/api/auth/users` | GET | Daftar semua user (admin) |
+| `/api/auth/verify` | GET | Cek validitas token login saat ini |
+| `/api/auth/refresh` | POST | Mendapatkan token baru lewat refresh token |
+| `/api/auth/quick-refresh` | POST | Refresh token cepat |
 
 ---
 
-## 3. Alur Chat / Query AI
+## 3. Alur Chat & Query AI (RAG)
 
-Ini adalah **alur utama** saat pengguna mengajukan pertanyaan.
+Ini adalah **alur utama** saat pengguna mengajukan pertanyaan ke model gpt-oss-120b.
 
 ```mermaid
 flowchart TD
-    A["👤 User mengetik pertanyaan"] --> B{Mode yang dipilih?}
+    A["👤 User mengetik pertanyaan"] --> C["POST /api/chat/universal<br>atau /api/chat/stream"]
 
-    B -->|Q&A / Summary| C["POST /api/chat/advanced-query"]
-    B -->|Enhanced Visual| D["POST /api/chat/universal-visual"]
-    B -->|Ontology| E["POST /api/chat/ontology"]
-    B -->|Strategic| F["POST /api/chat/strategic-analysis"]
-
-    C --> G["chatController.advancedQuery"]
-    D --> H["chatController.universalVisual"]
-    E --> I["chatController.ontology"]
-    F --> J["chatController.strategicAnalysis"]
+    C --> G["chatController"]
 
     G --> K["Services Layer"]
-    H --> K
-    I --> K
-    J --> K
 
-    K --> L["ragService.query()<br/>Cari konteks dari dokumen"]
-    K --> M["aiService<br/>Kirim ke Groq LLM"]
-    K --> N["visualAnalysisService<br/>Generate visualisasi"]
-    K --> O["ontologyService<br/>Ekstrak entitas & relasi"]
+    K --> L["rag.service<br/>Cari konteks dokumen"]
+    K --> M["groq.service<br/>Kirim prompt ke gpt-oss-120b"]
 
-    L --> P["Elasticsearch<br/>(Vector Search)"]
-    M --> Q["Groq API<br/>(Llama 3.3 70B)"]
+    L --> P["PostgreSQL (pgvector)<br/>(Vector Similarity Search)"]
+    M --> Q["Groq API"]
 
     P --> R["Context Merger"]
     Q --> R
-    N --> R
-    O --> R
 
-    R --> S["Response + Visualisasi + Sources"]
+    R --> S["Response stream ke CLI / Web UI"]
     S --> T["👤 User melihat jawaban"]
 ```
 
-### Detail Endpoint Chat
+### Detail Endpoint Chat & Fitur Terkait
 
-| Endpoint | Fungsi | Service Utama |
-|---|---|---|
-| `/api/chat/advanced-query` | Analisis teks lanjutan + security scan | ai, rag, processor |
-| `/api/chat/universal-visual` | Analisis visual + Elasticsearch data | visual-analysis, rag |
-| `/api/chat/ontology` | Knowledge graph & entity extraction | ontology, rag |
-| `/api/chat/strategic-analysis` | SWOT, threat matrix, fishbone | visual-analysis, rag |
-| `/api/chat/smart-query` | Auto-detect tipe analisis | ai, visual-analysis |
-| `/api/chat/visual-request` | Request visualisasi spesifik | visual-analysis |
-| `/api/chat/quick-visual` | Visualisasi cepat dari topik | visual-analysis |
-| `/api/chat/query` | Query dasar RAG | rag, ai, processor |
+| Endpoint | Method | Fungsi Utama | Controller |
+|---|---|---|---|
+| `/api/chat/universal` | POST | Mengirim pesan (non-stream) ke AI RAG | `chatController` |
+| `/api/chat/stream` | POST | Meminta balasan AI secara streaming | `chatController` |
+| `/api/chat/sessions` | GET/POST/PATCH/DELETE | CRUD Manajemen Sesi Obrolan | `sessionController` |
+| `/api/chat/history/:id` | GET | Mengambil riwayat percakapan sesi | `sessionController` |
+| `/api/chat/feedback` | POST/GET | Memberikan/Melihat Rating jawaban AI | `feedbackController` |
 
 ---
 
-## 4. Alur RAG (Document Upload & Retrieval)
+## 4. Alur Upload & Manajemen Dokumen (RAG Pipeline)
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant FE as Frontend (useRAG)
-    participant API as /api/rag
-    participant RAG as ragController
-    participant ES as Elasticsearch
-    participant DB as PostgreSQL
+    participant API as /api/document
+    participant DOC as documentController
+    participant SVC as document-extractor.service
+    participant DB as PostgreSQL (pgvector)
 
     Note over U,DB: 📤 Upload Dokumen
 
-    U->>FE: Pilih file (PDF/TXT)
-    FE->>API: POST /api/rag/documents (multipart)
-    API->>RAG: uploadDocuments()
-    RAG->>RAG: Parse & chunk dokumen
-    RAG->>ES: Index chunks + embeddings
-    RAG->>DB: Simpan metadata dokumen
-    RAG-->>FE: ✅ Upload berhasil
-
-    Note over U,DB: 🔍 Pencarian Konteks (saat Query)
-
-    FE->>API: ragService.query(question)
-    API->>ES: Vector similarity search
-    ES-->>API: Top-K relevant chunks
-    API-->>FE: Konteks dokumen + skor relevansi
+    U->>FE: Pilih file PDF/TXT/DOCX
+    FE->>API: POST /api/document/documents (multipart Multer)
+    API->>DOC: uploadDocuments()
+    DOC->>SVC: Ekstraksi teks (Tika / LlamaParse)
+    SVC->>SVC: Chunking dokumen teks
+    SVC->>SVC: embedding.service (Buat Emdedding)
+    SVC->>DB: Insert ke tabel DocumentChunk (vector(384))
+    SVC->>DB: Simpan tabel Document metadata
+    DOC-->>FE: ✅ Upload & Indexing berhasil
 ```
 
 | Endpoint | Method | Fungsi |
 |---|---|---|
-| `/api/rag/documents` | POST | Upload dokumen (PDF/TXT, max 10MB) |
-| `/api/rag/documents/uploaded` | GET | Daftar dokumen yang sudah diupload |
-| `/api/rag/documents/:id` | DELETE | Hapus dokumen |
-| `/api/rag/search` | GET | Cari dokumen berdasarkan query |
-| `/api/rag/index-info` | GET | Info index Elasticsearch |
+| `/api/document/documents` | POST | Upload file (hingga 10MB) dan proses Embedding (pgvector) |
 
 ---
 
-## 5. Alur Security & Classification
+## 5. Security & Validation
 
-```mermaid
-flowchart LR
-    A["Request masuk"] --> B["Auth Middleware"]
-    B --> C{Token valid?}
-    C -->|Tidak| D["❌ 401 Unauthorized"]
-    C -->|Ya| E["Set req.user"]
-    E --> F["Classification Middleware"]
-    F --> G{Role & Clearance}
-    G -->|Publik| H["Akses: Publik saja"]
-    G -->|Internal| I["Akses: Publik + Internal"]
-    G -->|Terbatas| J["Akses: + Terbatas"]
-    G -->|Rahasia| K["Akses: Semua level"]
-    H & I & J & K --> L["Controller menerima request"]
-    L --> M["PII Masking"]
-    M --> N["Security Scan"]
-    N --> O["Response ke User"]
-```
-
-### Level Klasifikasi Dokumen
-
-| Level | Warna | Siapa yang boleh akses |
-|---|---|---|
-| **Rahasia** | 🔴 Merah | Admin saja |
-| **Terbatas** | 🟠 Oranye | Analyst + Admin |
-| **Internal** | 🟡 Kuning | User + Analyst + Admin |
-| **Publik** | 🟢 Hijau | Semua pengguna |
+1.  **JWT Authentication Middleware** (`auth.middleware.ts`): Memeriksa keberadaan dan keabsahan token JWT di Header sebelum meloloskan request.
+2.  **Zod Validation Middleware** (`validation.middleware.ts`): Memvalidasi tipe dan skema payload request (misal validasi email wajib diisi, validasi skema pesan obrolan).
+3.  **CORS**: Diatur di Express untuk membatasi origin spesifik (`ALLOWED_ORIGINS` di `.env`).
 
 ---
 
-## 6. Layer Services
+## 6. Layer Services (Core Business Logic)
 
-```mermaid
-graph LR
-    subgraph Controllers
-        CC["chatController"]
-        AC["authController"]
-        RC["ragController"]
-    end
+Terdapat 8 Service utama di dalam `src/services/` yang menjadi tulang punggung aplikasi saat ini:
 
-    subgraph Services["Services (11 files)"]
-        AI["ai.service<br/>(Groq LLM)"]
-        RAG["rag.service<br/>(Document retrieval)"]
-        VA["visual-analysis.service<br/>(Visualisasi)"]
-        ONT["ontology.service<br/>(Knowledge Graph)"]
-        AUTH["auth.service<br/>(JWT + bcrypt)"]
-        CLS["classification.service<br/>(Tingkat keamanan)"]
-        POL["policy-analysis.service<br/>(Analisis kebijakan)"]
-        QC["query-classifier.service<br/>(Klasifikasi query)"]
-        PROC["processor.service<br/>(Post-processing)"]
-        SEARCH["search.service<br/>(Pencarian)"]
-        TOOL["tool-calling.service<br/>(Tool calling)"]
-    end
-
-    CC --> AI & RAG & VA & ONT & PROC & SEARCH & TOOL & QC & POL
-    AC --> AUTH
-    RC --> RAG
-```
+1.  **`chat.service.ts`**: Menangani penyusunan pesan sistem obrolan.
+2.  **`document-extractor.service.ts`**: Memecah file PDF/dokumen fisik menjadi teks menggunakan Tika atau LlamaParse.
+3.  **`embedding.service.ts`**: Menghasilkan representasi vektor teks/chunk dokumen.
+4.  **`feedback.service.ts`**: Mengelola _rating_ (jempol atas/bawah) pesan AI dari pengguna.
+5.  **`groq.service.ts`**: Klien utama untuk berinteraksi dengan API LLM dari Groq.
+6.  **`onyx.service.ts`**: (Pengembangan) Integrasi dengan Onyx AI RAG Platform.
+7.  **`rag.service.ts`**: Layanan inti untuk pencarian *Semantic Search* terhadap teks di _database_ yang mirip dengan pertanyaan pengguna.
+8.  **`session.service.ts`**: Menyimpan dan melacak riwayat serta konteks obrolan unik tiap pengguna.
 
 ---
 
-## 7. Technology Stack
+## 7. Technology Stack Spesifik
 
 | Layer | Teknologi |
 |---|---|
-| **Frontend** | Next.js 14 (App Router), React, TypeScript, Tailwind CSS |
-| **Backend** | Express.js, Node.js |
-| **Database** | PostgreSQL + Prisma ORM |
-| **Search Engine** | Elasticsearch (vector search + full-text) |
-| **AI/LLM** | Groq API → Llama 3.3 70B Versatile |
-| **Auth** | JWT (access + refresh tokens), bcrypt |
-| **File Upload** | Multer (memory storage, max 10MB) |
-| **Security** | Helmet, CORS, PII masking, security scan |
+| **Frontend** | Next.js 14, React, Tailwind CSS |
+| **Backend** | Express.js, TypeScript, Node.js |
+| **Database/ORM** | PostgreSQL via Prisma ORM |
+| **Vector Search** | `pgvector` di PostgreSQL |
+| **AI/LLM** | Groq API (_gpt-oss-120b_) |
+| **Auth** | JWT (JSON Web Tokens), `bcrypt` |
+| **File Parser** | Multer, Apache Tika Lokal, LlamaParse |
+| **Caching** | Redis (melalui _docker-compose_) |
+| **Monitoring Tool** | Logstash/Kibana & Elasticsearch (in _docker-compose_ for infra view) |
 
 ---
 
-## 8. Ringkasan Folder Project
+## 8. Ringkasan Root Folder Project
 
 ```
 acs-master/ (Backend)
-├── index.js              # Entry point + global middleware
-├── middleware/
-│   └── auth.middleware.js # JWT + classification guard
-├── routes/
-│   ├── auth.routes.js     # Auth endpoints
-│   ├── chat.js            # Chat endpoints → chatController
-│   └── rag.js             # RAG endpoints → ragController
-├── controllers/
-│   ├── auth.controller.js # Login, logout, profile
-│   ├── chat.controller.js # Visual, query, ontology
-│   └── rag.controller.js  # Upload, delete, search
-├── services/ (11 files)   # Business logic layer
-├── prisma/                # Database schema & migrations
-└── elasticsearch/         # ES setup & configuration
+├── src/
+│   ├── index.ts              # Entry point Express.js app
+│   ├── middleware/           # auth, error, validation middleware
+│   ├── routes/               # auth, chat, document, health routes
+│   ├── controllers/          # Logika Request & HTTP Response
+│   ├── services/             # 8 Core Business Logic Services
+│   ├── validation/           # Zod schema validation
+│   └── workers/              # Background Task Handlers
+├── prisma/                   # schema.prisma (Postgres + pgvector)
+└── docker-compose.yml        # Redis, Elasticsearch, Kibana, Tika
 
-bin-intelligence-assistant/ (Frontend)
+acs-frontend/ (Frontend)
 ├── app/
-│   ├── page.tsx           # Landing page
-│   ├── login/             # Login page
-│   └── analyst-workspace/ # Main workspace
-├── components/
-│   ├── ai-model.tsx       # Main AI chat component
-│   └── ui/                # Reusable UI components
-├── hooks/
-│   ├── useChat.ts         # Chat API state management
-│   └── useRAG.ts          # RAG document management
-└── types/
-    └── chat.ts            # Shared TypeScript interfaces
+│   ├── page.tsx              # Landing page
+│   ├── login/                # Auth halaman
+│   └── analyst-workspace/    # Main Chat Workspace GUI
+├── components/               # Komponen AI Model & UI Shadcn
+├── hooks/                    # useChat.ts, useRAG.ts, useSession.ts
+└── types/                    # Tipe Data TypeScript
 ```

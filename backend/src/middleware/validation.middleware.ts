@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { ZodSchema, ZodError } from "zod";
+import { ZodSchema, ZodError, ZodIssue } from "zod";
 
 /**
  * Express middleware factory for Zod request body validation.
@@ -12,7 +12,7 @@ export const validate =
       next();
     } catch (error) {
       if (error instanceof ZodError) {
-        const details = error.issues.map((issue: any) => ({
+        const details = error.issues.map((issue: ZodIssue) => ({
           field: issue.path.join("."),
           message: issue.message,
         }));

@@ -2,7 +2,7 @@ import { Worker, Job } from "bullmq";
 import fs from "fs";
 import { redisConnection } from "../config/redis";
 import { DOCUMENT_QUEUE_NAME } from "../config/queue";
-import { prisma, esClient } from "../config/db";
+import { prisma, esClient, pgVectorAvailable } from "../config/db";
 import { DocumentExtractorService } from "../services/document-extractor.service";
 import { EmbeddingService } from "../services/embedding.service";
 
@@ -44,63 +44,112 @@ export const documentWorker = new Worker(
         data: { content },
       });
 
-      // 4. Generate Embeddings and Index to ES (with batching)
+      // 4. Generate Embeddings and Index to ES + PostgreSQL (with batching)
       const chunks = EmbeddingService.semanticChunk(content);
       console.log(
         `[Worker] Split ${originalname} into ${chunks.length} chunks (semantic).`,
       );
 
-      try {
-        const operations = [];
+      // Collect all embeddings for both ES and PG indexing
+      const allEmbeddings: number[][] = [];
+      const esOperations: any[] = [];
 
-        // Process embeddings in batches for better performance
-        for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
-          const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE);
-          const embeddings = await Promise.all(
-            batch.map((chunk) => EmbeddingService.generateEmbedding(chunk)),
-          );
-
-          for (let j = 0; j < batch.length; j++) {
-            const chunkIndex = i + j;
-            operations.push({
-              index: {
-                _index: "documents",
-                _id: `${doc.id}_chunk_${chunkIndex}`,
-              },
-            });
-            operations.push({
-              title: doc.title,
-              content: batch[j],
-              category: doc.category,
-              classification: doc.classification,
-              tags: doc.tags,
-              database_id: doc.id,
-              chunk_index: chunkIndex,
-              timestamp: new Date(),
-              embedding: embeddings[j],
-            });
-          }
-        }
-
-        if (operations.length > 0) {
-          await esClient.bulk({ refresh: true, operations });
-        }
-
-        // 5. Update Status to COMPLETED
-        await prisma.document.update({
-          where: { id: documentId },
-          data: { status: "COMPLETED" },
-        });
-      } catch (esError: any) {
-        // Graceful degradation: content is saved, but ES indexing failed
-        console.warn(
-          `[Worker] ES indexing failed for ${originalname}: ${esError.message}. Document saved without search index.`,
+      // Process embeddings in batches for better performance
+      for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
+        const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE);
+        const embeddings = await Promise.all(
+          batch.map((chunk) => EmbeddingService.generateEmbedding(chunk)),
         );
-        await prisma.document.update({
-          where: { id: documentId },
-          data: { status: "COMPLETED_NO_INDEX" },
-        });
+
+        for (let j = 0; j < batch.length; j++) {
+          const chunkIndex = i + j;
+          allEmbeddings.push(embeddings[j]);
+          esOperations.push({
+            index: {
+              _index: "documents",
+              _id: `${doc.id}_chunk_${chunkIndex}`,
+            },
+          });
+          esOperations.push({
+            title: doc.title,
+            content: batch[j],
+            category: doc.category,
+            classification: doc.classification,
+            tags: doc.tags,
+            database_id: doc.id,
+            chunk_index: chunkIndex,
+            timestamp: new Date(),
+            embedding: embeddings[j],
+          });
+        }
       }
+
+      // 4a. Index to Elasticsearch
+      try {
+        if (esOperations.length > 0) {
+          await esClient.bulk({ refresh: true, operations: esOperations });
+        }
+        console.log(`[Worker] ES indexing completed for ${originalname}`);
+      } catch (esError: any) {
+        console.warn(
+          `[Worker] ES indexing failed for ${originalname}: ${esError.message}`,
+        );
+      }
+
+      // 4b. Store chunks + embeddings in PostgreSQL
+      try {
+        // First, remove any existing chunks for this document (in case of re-processing)
+        await prisma.documentChunk.deleteMany({
+          where: { documentId: doc.id },
+        });
+
+        // Insert chunks via Prisma
+        const createdChunks = await prisma.documentChunk.createMany({
+          data: chunks.map((chunkContent, idx) => ({
+            documentId: doc.id,
+            content: chunkContent,
+            chunkIndex: idx,
+          })),
+        });
+
+        // If pgvector is available, update embedding column via raw SQL
+        if (pgVectorAvailable) {
+          const pgChunks = await prisma.documentChunk.findMany({
+            where: { documentId: doc.id },
+            orderBy: { chunkIndex: "asc" },
+            select: { id: true, chunkIndex: true },
+          });
+
+          for (const pgChunk of pgChunks) {
+            const embedding = allEmbeddings[pgChunk.chunkIndex];
+            if (embedding) {
+              const vectorStr = `[${embedding.join(",")}]`;
+              await prisma.$executeRawUnsafe(
+                `UPDATE "DocumentChunk" SET "embedding" = $1::vector WHERE "id" = $2`,
+                vectorStr,
+                pgChunk.id,
+              );
+            }
+          }
+          console.log(
+            `[Worker] PG vector indexing completed for ${originalname} (${pgChunks.length} chunks)`,
+          );
+        } else {
+          console.log(
+            `[Worker] PG chunks saved without embeddings (pgvector not available) for ${originalname}`,
+          );
+        }
+      } catch (pgError: any) {
+        console.warn(
+          `[Worker] PG chunk storage failed for ${originalname}: ${pgError.message}`,
+        );
+      }
+
+      // 5. Update Status to COMPLETED
+      await prisma.document.update({
+        where: { id: documentId },
+        data: { status: "COMPLETED" },
+      });
 
       // 6. Cleanup uploaded file to save disk space
       try {

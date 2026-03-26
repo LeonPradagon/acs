@@ -1,10 +1,8 @@
 import React from "react";
-import { Calendar, Bell, LogOut, User, Upload } from "lucide-react";
+import { Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 interface WorkspaceHeaderProps {
-  handleLogout: () => void;
   currentTime: string;
 }
 
@@ -12,7 +10,6 @@ interface WorkspaceHeaderProps {
  * Header component for the Analyst Workspace
  */
 export const WorkspaceHeader = ({
-  handleLogout,
   currentTime,
 }: WorkspaceHeaderProps) => {
   return (
@@ -39,23 +36,9 @@ export const WorkspaceHeader = ({
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Calendar className="w-4 h-4" />
-            <span>{currentTime}</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleLogout}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-            >
-              <LogOut className="w-4 h-4" />
-            </Button>
-            <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center">
-              <User className="w-4 h-4 text-muted-foreground" />
-            </div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mr-4">
+            <Calendar className="w-4 h-4 text-indigo-500/80" />
+            <span className="font-semibold tracking-tight">{currentTime}</span>
           </div>
         </div>
       </div>

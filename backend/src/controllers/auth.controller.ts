@@ -22,15 +22,25 @@ export const register = async (req: Request, res: Response) => {
       },
     });
 
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
+    const accessToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role, type: "access" },
+      env.JWT_SECRET,
+      { expiresIn: "1h" },
+    );
+
+    const refreshToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role, type: "refresh" },
       env.JWT_SECRET,
       { expiresIn: "7d" },
     );
 
     res.status(201).json({
       message: "User registered successfully",
-      token,
+      token: accessToken, // Kept for legacy compatibility
+      tokens: {
+        accessToken,
+        refreshToken,
+      },
       user: { id: user.id, email: user.email, name: user.name },
     });
   } catch (error: any) {
@@ -62,8 +72,14 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
+    const accessToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role, type: "access" },
+      env.JWT_SECRET,
+      { expiresIn: "1h" },
+    );
+
+    const refreshToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role, type: "refresh" },
       env.JWT_SECRET,
       { expiresIn: "7d" },
     );
@@ -80,10 +96,10 @@ export const login = async (req: Request, res: Response) => {
           role: user.role,
         },
         tokens: {
-          accessToken: token,
-          refreshToken: token,
-          expiresIn: "7d",
-          remainingTime: 7 * 24 * 60 * 60,
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+          expiresIn: "1h",
+          remainingTime: 1 * 60 * 60,
         },
       },
       timestamp: new Date().toISOString(),
@@ -132,6 +148,12 @@ export const refreshToken = async (req: Request, res: Response) => {
 
   try {
     const decoded: any = jwt.verify(incomingToken, env.JWT_SECRET);
+    
+    // Explicitly reject access tokens when refreshing
+    if (decoded.type === "access") {
+      return res.status(401).json({ success: false, message: "Use refresh token to acquire a new access token" });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
     });
@@ -140,18 +162,18 @@ export const refreshToken = async (req: Request, res: Response) => {
         .status(404)
         .json({ success: false, message: "User not found" });
 
-    const newToken = jwt.sign(
-      { userId: user.id, email: user.email },
+    const newAccessToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role, type: "access" },
       env.JWT_SECRET,
-      { expiresIn: "7d" },
+      { expiresIn: "1h" },
     );
 
     res.status(200).json({
       success: true,
       data: {
-        accessToken: newToken,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        remainingTime: 7 * 24 * 60 * 60,
+        accessToken: newAccessToken,
+        expiresAt: new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString(),
+        remainingTime: 1 * 60 * 60,
       },
     });
   } catch (error) {

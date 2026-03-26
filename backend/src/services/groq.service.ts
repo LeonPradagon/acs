@@ -23,35 +23,41 @@ interface ChatMessageInput {
  */
 const buildSystemPrompt = (context: RagContext[]): string => {
   const contextString = context
-    .map((c, i) => `[Sumber ${i + 1}: ${c.source}]\n${c.content}`)
+    .map((c, i) => `<document index="${i + 1}" source="${c.source}">\n${c.content}\n</document>`)
     .join("\n\n");
 
   const hasContext = context.length > 0;
 
   return `Anda adalah ACS AI Assistant — asisten kecerdasan buatan yang canggih, membantu, dan akurat.
 
-PERAN UTAMA:
+<role>
 - Anda adalah asisten serba bisa yang bisa menjawab pertanyaan umum, membantu analisis, memberikan saran, dan berdiskusi seperti AI Assistant modern (ChatGPT, Gemini, Claude).
 - Anda harus ramah, informatif, dan memberikan jawaban yang terstruktur.
+</role>
 
-ATURAN PENTING:
+<rules>
 1. Selalu jawab dalam bahasa yang sama dengan bahasa pengguna.
 2. Gunakan format Markdown untuk jawaban yang terstruktur (heading, list, bold, code block, dll).
 3. Jika pengguna bertanya hal umum (coding, matematika, penjelasan konsep), jawab dengan pengetahuan Anda.
-4. Jika ada KONTEKS REFERENSI di bawah, prioritaskan informasi dari konteks tersebut dan sertakan sitasi [Sumber X].
-5. Jika pengguna bertanya tentang data spesifik dan TIDAK ADA konteks referensi, jelaskan bahwa data tersebut belum tersedia di database.
-6. Jangan pernah mengarang data atau statistik spesifik. Untuk pengetahuan umum, Anda boleh menjawab.
+4. Jika ada <context> di bawah, prioritaskan informasi dari <context> tersebut dan sertakan sitasi [Sumber X] berdasarkan atribut source.
+5. Jika pengguna bertanya tentang data spesifik dan TIDAK ADA konteks dokumen pendukung, jelaskan bahwa data tersebut belum tersedia di database.
+6. JANGAN PERNAH mengarang data, angka, atau statistik spesifik. Untuk pertanyaan umum yang tidak terkait data internal, Anda boleh menjawab menggunakan pengetahuan umum.
+</rules>
 
-FORMAT RESPONS:
+<format>
 - Gunakan Markdown dengan heading (##), bullet points, bold (**teks**), dan code blocks sesuai kebutuhan.
 - Untuk penjelasan panjang, bagi menjadi beberapa bagian yang terstruktur.
-- Berikan jawaban yang lengkap namun ringkas.
+- Berikan jawaban yang lengkap namun padat dan jelas.
+</format>
 
 ${
   hasContext
-    ? `KONTEKS REFERENSI (dari database):
-${contextString}`
-    : "KONTEKS REFERENSI: Tidak ada data spesifik dari database untuk query ini. Jawab berdasarkan pengetahuan umum Anda."
+    ? `<context>
+Kumpulan dokumen referensi berikut ditarik dari database berdasarkan pertanyaan pengguna:
+
+${contextString}
+</context>`
+    : "<context>\nTidak ada data spesifik dari database untuk query ini. Jawab berdasarkan pengetahuan umum Anda.\n</context>"
 }`;
 };
 
@@ -59,6 +65,7 @@ ${contextString}`
  * Check if an error is retryable (network/server errors, not auth errors)
  */
 function isRetryableError(error: any): boolean {
+  if (error?.name === "AbortError") return false;
   if (error?.status && error.status >= 400 && error.status < 500) return false;
   return true;
 }
@@ -126,7 +133,7 @@ export const getUniversalResponse = async (
         return { isJson: true, data: parsed };
       }
     } catch (e) {
-      console.warn("Failed to parse JSON from AI response.");
+      console.error("[Groq Service] Failed to parse JSON from AI response:", e, "\nOriginal Content:", outputContent);
     }
   }
 
@@ -143,6 +150,7 @@ export const getStreamingResponse = async (
   conversationHistory: ChatMessageInput[] = [],
   onToken: (token: string) => void,
   onDone: () => void,
+  abortSignal?: AbortSignal,
 ): Promise<void> => {
   const systemPrompt = buildSystemPrompt(context);
 
@@ -169,14 +177,17 @@ export const getStreamingResponse = async (
 
   // Typecast the creation to tell TS we are explicitly requesting a string stream
   const createStream = () =>
-    groq.chat.completions.create({
-      messages,
-      model: model || "llama3-70b-8192",
-      temperature: 0.3,
-      max_tokens: 4096,
-      top_p: 0.9,
-      stream: true,
-    }) as any;
+    groq.chat.completions.create(
+      {
+        messages,
+        model: model || "llama3-70b-8192",
+        temperature: 0.3,
+        max_tokens: 4096,
+        top_p: 0.9,
+        stream: true,
+      },
+      { signal: abortSignal }
+    ) as any;
 
   const stream: any = await withRetry(createStream, {
     maxRetries: 2,

@@ -1,37 +1,99 @@
-import { pipeline } from "@xenova/transformers";
+import { Worker } from "worker_threads";
+import path from "path";
 
 /**
  * Service to generate vector embeddings locally and handle document chunking.
- * Uses the all-MiniLM-L6-v2 model (384 dimensions).
+ * Refactored to use worker_threads to prevent Express Event Loop blocking.
  */
 export class EmbeddingService {
-  private static extractor: any = null;
+  private static worker: Worker | null = null;
+  private static pendingRequests = new Map<
+    string,
+    { resolve: (data: number[]) => void; reject: (err: any) => void }
+  >();
+  private static messageIdCounter = 0;
+  private static isInitialized = false;
+  private static initPromise: Promise<void> | null = null;
 
   /**
-   * Initialize the embedding pipeline
+   * Initialize the embedding worker thread
    */
   static async init() {
-    if (!this.extractor) {
-      console.log("[Embedding] Initializing all-MiniLM-L6-v2 model...");
-      this.extractor = await pipeline(
-        "feature-extraction",
-        "Xenova/all-MiniLM-L6-v2",
-      );
-    }
+    if (this.isInitialized) return;
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = new Promise((resolve, reject) => {
+      console.log("[Embedding] Starting Xenova worker thread...");
+      
+      // Determine correct path whether running via ts-node, tsx, or compiled js
+      const workerPath = path.join(__dirname, "embedding.thread.ts");
+      const ext = path.extname(__filename);
+      const isTsNode = (process as any)[Symbol.for("ts-node.register.instance")] || process.env.TS_NODE_DEV;
+      
+      let workerInstance: Worker;
+      if (ext === ".ts" || isTsNode) {
+        // Run TS file via ts-node/register in worker
+        workerInstance = new Worker(`
+          require('ts-node').register();
+          require('${workerPath.replace(/\\/g, '\\\\')}');
+        `, { eval: true });
+      } else {
+        // Compiled JS
+        workerInstance = new Worker(path.join(__dirname, "embedding.thread.js"));
+      }
+
+      this.worker = workerInstance;
+
+      this.worker.on("message", (msg) => {
+        if (msg.type === "INIT_DONE") {
+          console.log("[Embedding] Worker thread initialized successfully.");
+          this.isInitialized = true;
+          resolve();
+        } else if (msg.type === "EMBED_DONE") {
+          const req = this.pendingRequests.get(msg.id);
+          if (req) {
+            req.resolve(msg.data);
+            this.pendingRequests.delete(msg.id);
+          }
+        } else if (msg.type === "ERROR") {
+          const req = this.pendingRequests.get(msg.id);
+          if (req) {
+            req.reject(new Error(msg.error));
+            this.pendingRequests.delete(msg.id);
+          } else {
+            console.error("[Embedding] Worker Error:", msg.error);
+            reject(new Error(msg.error));
+          }
+        }
+      });
+
+      this.worker.on("error", (err) => {
+        console.error("[Embedding Worker] Process Error:", err);
+        reject(err);
+      });
+
+      this.worker.postMessage({ type: "INIT" });
+    });
+
+    return this.initPromise;
   }
 
   /**
-   * Generate an embedding vector for a given string
+   * Generate an embedding vector for a given string via worker thread
    */
   static async generateEmbedding(text: string): Promise<number[]> {
     await this.init();
 
-    const output = await this.extractor(text, {
-      pooling: "mean",
-      normalize: true,
+    return new Promise((resolve, reject) => {
+      const id = `req_${++this.messageIdCounter}`;
+      this.pendingRequests.set(id, { resolve, reject });
+      
+      this.worker?.postMessage({
+        type: "EMBED",
+        id: id,
+        text: text,
+      });
     });
-
-    return Array.from(output.data);
   }
 
   /**
@@ -63,8 +125,8 @@ export class EmbeddingService {
    */
   static semanticChunk(
     text: string,
-    maxChunkSize: number = 800,
-    overlap: number = 100,
+    maxChunkSize: number = 1500,
+    overlap: number = 300,
   ): string[] {
     if (text.length <= maxChunkSize) return [text];
 
@@ -112,5 +174,17 @@ export class EmbeddingService {
     }
 
     return chunks;
+  }
+
+  /**
+   * Terminate the worker thread gracefully
+   */
+  static async close() {
+    if (this.worker) {
+      await this.worker.terminate();
+      this.worker = null;
+      this.isInitialized = false;
+      this.initPromise = null;
+    }
   }
 }

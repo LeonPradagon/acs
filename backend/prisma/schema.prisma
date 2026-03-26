@@ -8,35 +8,53 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
+  id        String     @id @default(uuid())
+  email     String     @unique
   password  String
   name      String?
-  role      String   @default("user")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  role      String     @default("user")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  documents Document[]
 }
 
 model Document {
-  id             String   @id @default(uuid())
+  id             String          @id @default(uuid())
   title          String
   content        String
   category       String?
   classification String?
   tags           String[]
   metadata       Json?
-  status         String   @default("COMPLETED") // PENDING, PROCESSING, COMPLETED, FAILED
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  status         String          @default("COMPLETED") // PENDING, PROCESSING, COMPLETED, FAILED
+  userId         String? // Ownership for private docs (like emails)
+  user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  chunks         DocumentChunk[]
+}
+
+/// Stores individual text chunks with vector embeddings for pgvector search.
+/// The "embedding" column (vector(384)) is added via raw SQL migration.
+model DocumentChunk {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  content    String
+  chunkIndex Int
+  createdAt  DateTime @default(now())
+
+  @@index([documentId])
 }
 
 model ChatSession {
-  id        String        @id @default(uuid())
-  title     String        @default("New Chat")
-  userId    String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  messages  ChatHistory[]
+  id            String        @id @default(uuid())
+  title         String        @default("New Chat")
+  userId        String?
+  onyxSessionId String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  messages      ChatHistory[]
 }
 
 model ChatHistory {
@@ -55,7 +73,7 @@ model ChatFeedback {
   messageId String      @unique
   message   ChatHistory @relation(fields: [messageId], references: [id], onDelete: Cascade)
   userId    String?
-  rating    String      // "thumbs_up" or "thumbs_down"
+  rating    String // "thumbs_up" or "thumbs_down"
   comment   String?
   createdAt DateTime    @default(now())
 }

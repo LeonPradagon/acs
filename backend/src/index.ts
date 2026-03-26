@@ -7,11 +7,13 @@ import chatRoutes from "./routes/chat.routes";
 import authRoutes from "./routes/auth.routes";
 import documentRoutes from "./routes/document.routes";
 import healthRoutes from "./routes/health.routes";
+import adminRoutes from "./routes/admin.routes";
 import { prisma, esClient, testConnections } from "./config/db";
 import { redisConnection } from "./config/redis";
 import { documentWorker } from "./workers/document.worker";
 import { errorMiddleware } from "./middleware/error.middleware";
 import { env } from "./common/env";
+import { EmbeddingService } from "./services/embedding.service";
 
 // Initialize BullMQ Worker
 import "./workers/document.worker";
@@ -88,6 +90,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatLimiter, chatRoutes);
 app.use("/api/rag", documentRoutes);
 app.use("/api/health", healthRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: "Endpoint not found" });
@@ -113,6 +116,10 @@ const shutdown = async (signal: string) => {
     // Close BullMQ worker
     await documentWorker.close();
     console.log("✔ BullMQ Worker closed.");
+
+    // Close Embedding Thread
+    await EmbeddingService.close();
+    console.log("✔ Embedding Thread closed.");
 
     // Close database connections
     await prisma.$disconnect();

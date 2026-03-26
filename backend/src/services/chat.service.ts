@@ -14,22 +14,23 @@ export class ChatService {
     answer: string,
     files?: any[],
   ) {
-    await prisma.chatHistory.create({
-      data: {
-        sessionId,
-        role: "user",
-        content: question,
-        files: files && files.length > 0 ? files : undefined,
-      },
-    });
-
-    await prisma.chatHistory.create({
-      data: {
-        sessionId,
-        role: "assistant",
-        content: answer,
-      },
-    });
+    await prisma.$transaction([
+      prisma.chatHistory.create({
+        data: {
+          sessionId,
+          role: "user",
+          content: question,
+          files: files && files.length > 0 ? files : undefined,
+        },
+      }),
+      prisma.chatHistory.create({
+        data: {
+          sessionId,
+          role: "assistant",
+          content: answer,
+        },
+      }),
+    ]);
   }
 
   /**
@@ -56,7 +57,8 @@ Jawaban: ${answer.substring(0, 200)}`,
         .substring(0, 80);
 
       return title || question.substring(0, 60);
-    } catch {
+    } catch (error) {
+      console.error("[Session Title Generation Error]:", error);
       // Fallback to truncated question
       return question.substring(0, 60) + (question.length > 60 ? "..." : "");
     }

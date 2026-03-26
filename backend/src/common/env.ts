@@ -45,6 +45,10 @@ export const env = {
   // AI Services
   GROQ_API_KEY: requireEnv("GROQ_API_KEY"),
   LLAMAPARSE_API_KEY: process.env.LLAMAPARSE_API_KEY || "",
+  
+  // Onyx AI
+  ONYX_API_KEY: process.env.ONYX_API_KEY || "",
+  ONYX_API_URL: process.env.ONYX_API_URL || "http://localhost:8080",
 
   // Document Extractor
   TIKA_URL: optionalEnv("TIKA_URL", "http://localhost:9998"),

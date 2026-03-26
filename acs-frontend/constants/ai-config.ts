@@ -74,8 +74,8 @@ export const AVAILABLE_MODELS = {
     icon: Rocket,
     color: "bg-purple-100 text-purple-700 border-purple-200",
   },
-  "llama-3.2-90b-vision-preview": {
-    name: "Llama 3.2 Vision",
+  "meta-llama/llama-4-scout-17b-16e-instruct": {
+    name: "Llama 4 Scout Vision",
     description: "Model canggih dengan kemampuan analisis gambar (Multimodal)",
     icon: ImageIcon,
     color: "bg-blue-100 text-blue-700 border-blue-200",

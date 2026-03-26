@@ -44,23 +44,6 @@ export const useChat = (options: UseChatOptions = {}) => {
     }
   }, []);
 
-  // Initialize
-  useEffect(() => {
-    const initChat = async () => {
-      try {
-        const isHealthy = await aiQueryService.checkHealth();
-        setApiStatus(isHealthy ? "connected" : "error");
-
-        if (isHealthy) {
-          await loadSessionsList();
-        }
-      } catch {
-        setApiStatus("error");
-      }
-    };
-
-    initChat();
-  }, [loadSessionsList]);
 
   // Handle setting welcome message if no history
   useEffect(() => {
@@ -140,6 +123,30 @@ export const useChat = (options: UseChatOptions = {}) => {
       console.error("Failed to load session history", err);
     }
   }, []);
+
+  const hasInit = useRef(false);
+
+  // Initialize
+  useEffect(() => {
+    if (hasInit.current) return;
+    hasInit.current = true;
+
+    const initChat = async () => {
+      try {
+        const isHealthy = await aiQueryService.checkHealth();
+        setApiStatus(isHealthy ? "connected" : "error");
+
+        if (isHealthy) {
+          const list = await aiQueryService.listSessions();
+          setSessions(list);
+        }
+      } catch {
+        setApiStatus("error");
+      }
+    };
+
+    initChat();
+  }, [handleSelectSession]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {

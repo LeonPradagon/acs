@@ -48,6 +48,7 @@ import { useRAG } from "@/hooks/useRAG";
 // Sub-components
 import { ChatMessageView } from "./chat/chat-message-view";
 import { ChatSidebar } from "./workspace/chat-sidebar";
+import { AdminSettingsModal } from "./admin/admin-settings-modal";
 
 // Config
 import { AVAILABLE_MODELS } from "@/constants/ai-config";
@@ -88,8 +89,16 @@ function WelcomeScreen({
   onPromptClick: (prompt: string) => void;
   userName: string;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   return (
-    <div className="flex flex-col items-center justify-center max-w-2xl mx-auto px-6 py-10 animate-in fade-in duration-700">
+    <div 
+      className={cn(
+        "flex flex-col items-center justify-center max-w-2xl mx-auto px-6 py-10 transition-all duration-1000 ease-out",
+        mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+      )}
+    >
       {/* Compact Header Area */}
       <div className="flex flex-col items-center mb-6 text-center">
         <img
@@ -138,6 +147,7 @@ interface AIQueryInputProps {
   onProcessComplete?: (message: ChatMessage) => void;
   className?: string;
   workspaceHeader?: React.ReactNode;
+  handleLogout?: () => void;
 }
 
 export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
@@ -148,6 +158,8 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
   const rag = useRAG();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [userName, setUserName] = useState<string>("User");
+  const [userRole, setUserRole] = useState<string>("user");
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
 
   useEffect(() => {
@@ -157,6 +169,9 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
         const userObj = JSON.parse(userStr);
         if (userObj && userObj.name) {
           setUserName(userObj.name);
+        }
+        if (userObj && userObj.role) {
+          setUserRole(userObj.role);
         }
       }
     } catch (e) {
@@ -217,8 +232,8 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
 
     let base64Images: string[] = [];
     if (imageFiles.length > 0) {
-      if (chat.selectedModel !== "llama-3.2-90b-vision-preview") {
-        chat.setSelectedModel("llama-3.2-90b-vision-preview");
+      if (chat.selectedModel !== "meta-llama/llama-4-scout-17b-16e-instruct") {
+        chat.setSelectedModel("meta-llama/llama-4-scout-17b-16e-instruct");
       }
 
       base64Images = await Promise.all(
@@ -244,7 +259,9 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
         {},
         undefined,
         currentFiles,
-        base64Images.length > 0 ? "llama-3.2-90b-vision-preview" : undefined,
+        base64Images.length > 0
+          ? "meta-llama/llama-4-scout-17b-16e-instruct"
+          : undefined,
         base64Images,
       );
     }
@@ -261,6 +278,10 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
       <div className="flex h-full w-full overflow-hidden relative">
         {/* Chat Sidebar */}
         <ChatSidebar
+          isAdmin={userRole === "admin"}
+          userName={userName}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          handleLogout={props.handleLogout}
           sessions={chat.sessions}
           currentSessionId={chat.currentSessionId}
           isOpen={chat.isSidebarOpen}
@@ -598,6 +619,11 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
           </div>
         </div>
       </div>
+
+      <AdminSettingsModal
+        open={isSettingsOpen}
+        onOpenChange={setIsSettingsOpen}
+      />
     </>
   );
 });

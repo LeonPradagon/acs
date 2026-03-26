@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import apiClient from "@/lib/api-client";
 import { AxiosProgressEvent } from "axios";
 
@@ -27,6 +27,13 @@ export const useRAG = () => {
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
 
   const handleFileSelect = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -130,7 +137,8 @@ export const useRAG = () => {
         setShowUploadSuccess(true);
 
         // Reset state after success
-        setTimeout(() => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => {
           setShowUploadModal(false);
           setUploadedFiles([]);
           setUploadMetadata({

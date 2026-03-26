@@ -6,8 +6,12 @@ export class SessionService {
    * List all chat sessions for a user, ordered by most recent.
    */
   static async listSessions(userId?: string) {
+    if (!userId) {
+      throw new ForbiddenError("User ID is required to list sessions");
+    }
+    
     return prisma.chatSession.findMany({
-      where: userId ? { userId } : {},
+      where: { userId },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
@@ -37,13 +41,9 @@ export class SessionService {
   }
 
   /**
-   * Rename a chat session with ownership check.
+   * Helper method to verify session existence and ownership
    */
-  static async renameSession(
-    sessionId: string,
-    title: string,
-    userId?: string,
-  ) {
+  private static async _getSessionAndVerify(sessionId: string, userId?: string) {
     const session = await prisma.chatSession.findUnique({
       where: { id: sessionId },
     });
@@ -53,8 +53,21 @@ export class SessionService {
     }
 
     if (session.userId && userId && session.userId !== userId) {
-      throw new ForbiddenError("Not authorized to rename this session");
+      throw new ForbiddenError("Not authorized to access this session");
     }
+
+    return session;
+  }
+
+  /**
+   * Rename a chat session with ownership check.
+   */
+  static async renameSession(
+    sessionId: string,
+    title: string,
+    userId?: string,
+  ) {
+    await this._getSessionAndVerify(sessionId, userId);
 
     return prisma.chatSession.update({
       where: { id: sessionId },
@@ -66,17 +79,7 @@ export class SessionService {
    * Delete a chat session with ownership check.
    */
   static async deleteSession(sessionId: string, userId?: string) {
-    const session = await prisma.chatSession.findUnique({
-      where: { id: sessionId },
-    });
-
-    if (!session) {
-      throw new NotFoundError("Session");
-    }
-
-    if (session.userId && userId && session.userId !== userId) {
-      throw new ForbiddenError("Not authorized to delete this session");
-    }
+    await this._getSessionAndVerify(sessionId, userId);
 
     await prisma.chatSession.delete({
       where: { id: sessionId },
@@ -87,17 +90,7 @@ export class SessionService {
    * Load chat history for a session with ownership check.
    */
   static async getChatHistory(sessionId: string, userId?: string) {
-    const session = await prisma.chatSession.findUnique({
-      where: { id: sessionId },
-    });
-
-    if (!session) {
-      throw new NotFoundError("Session");
-    }
-
-    if (session.userId && userId && session.userId !== userId) {
-      throw new ForbiddenError("Not authorized to view this session");
-    }
+    await this._getSessionAndVerify(sessionId, userId);
 
     return prisma.chatHistory.findMany({
       where: { sessionId },

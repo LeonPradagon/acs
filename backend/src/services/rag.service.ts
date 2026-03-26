@@ -1,4 +1,4 @@
-import { prisma, esClient } from "../config/db";
+import { prisma, esClient, pgVectorAvailable } from "../config/db";
 import { EmbeddingService } from "./embedding.service";
 
 export interface RagContext {
@@ -149,9 +149,17 @@ function extractKeywords(query: string): string[] {
  * 2. Elasticsearch BM25 (Keyword)
  * with a PostgreSQL fallback.
  */
-export const retrieveContext = async (query: string): Promise<RagContext[]> => {
+export const retrieveContext = async (query: string, userId?: string): Promise<RagContext[]> => {
   let contexts: RagContext[] = [];
   const queryLower = query.toLowerCase();
+
+  // Generate query vector once — reused by both ES and PG searches
+  let queryVector: number[] | null = null;
+  try {
+    queryVector = await EmbeddingService.generateEmbedding(query);
+  } catch (err: any) {
+    console.warn("[RAG] Failed to generate query embedding:", err.message);
+  }
 
   // 1. Detection: Is the user asking about recent uploads?
   const isAskingAboutRecent = META_KEYWORDS.some((kw) =>
@@ -166,6 +174,10 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
       recentDocs = await prisma.document.findMany({
         where: {
           createdAt: { gte: fiveMinutesAgo },
+          OR: [
+            { userId: null },
+            ...(userId ? [{ userId }] : [])
+          ]
         },
         orderBy: { createdAt: "desc" },
         take: 10,
@@ -176,78 +188,140 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
   }
 
   // 3. Hybrid Search in Elasticsearch
-  try {
-    const queryVector = await EmbeddingService.generateEmbedding(query);
-
-    const esResponse = await esClient.search({
-      index: "documents",
-      knn: {
-        field: "embedding",
-        query_vector: queryVector,
-        k: 10,
-        num_candidates: 100,
-      },
-      query: {
-        bool: {
-          should: [
-            {
-              multi_match: {
-                query: query,
-                fields: ["content^2", "title"],
-                fuzziness: "AUTO",
-              },
-            },
-          ],
-        },
-      },
-      size: 10,
-    });
-
-    if (esResponse.hits.hits.length > 0) {
-      esResponse.hits.hits.forEach((hit: any) => {
-        const source: any = hit._source;
-        if (source && source.content) {
-          if (!contexts.some((c) => c.content === source.content)) {
-            contexts.push({
-              content: source.content,
-              source:
-                source.title || source.filename || "Elasticsearch Document",
-              score: hit._score || 0,
-            });
-          }
-        }
-      });
-    }
-  } catch (error: any) {
-    console.warn("[RAG] Hybrid search failed:", error.message);
-  }
-
-  // 4. PostgreSQL Keyword Fallback (if ES is sparse)
-  if (contexts.length < 3) {
+  if (queryVector) {
     try {
-      const keywords = extractKeywords(query);
-      if (keywords.length > 0) {
-        const pgDocs = await prisma.document.findMany({
-          where: {
-            OR: keywords.map((word) => ({
-              content: { contains: word, mode: "insensitive" },
-            })),
+      const esResponse = await esClient.search({
+        index: "documents",
+        knn: {
+          field: "embedding",
+          query_vector: queryVector,
+          k: 10,
+          num_candidates: 100,
+          filter: {
+            bool: {
+              should: [
+                { bool: { must_not: { exists: { field: "userId" } } } },
+                ...(userId ? [{ term: { userId: userId } }] : [])
+              ]
+            }
+          }
+        },
+        query: {
+          bool: {
+            must: [
+              {
+                multi_match: {
+                  query: query,
+                  fields: ["content^2", "title"],
+                  fuzziness: "AUTO",
+                },
+              },
+            ],
+            filter: [
+              {
+                bool: {
+                  should: [
+                    { bool: { must_not: { exists: { field: "userId" } } } },
+                    ...(userId ? [{ term: { userId: userId } }] : [])
+                  ]
+                }
+              }
+            ]
           },
-          take: 5,
-        });
+        },
+        size: 10,
+      });
 
-        pgDocs.forEach((doc) => {
-          if (!contexts.some((c) => c.content === doc.content)) {
-            contexts.push({
-              content: doc.content,
-              source: doc.title || "PostgreSQL Document",
-              score: 0.5,
-            });
+      if (esResponse.hits.hits.length > 0) {
+        esResponse.hits.hits.forEach((hit: any) => {
+          const source: any = hit._source;
+          if (source && source.content) {
+            if (!contexts.some((c) => c.content === source.content)) {
+              contexts.push({
+                content: source.content,
+                source:
+                  source.title || source.filename || "Elasticsearch Document",
+                score: hit._score || 0,
+              });
+            }
           }
         });
       }
-    } catch (err) {
-      console.warn("[RAG] PostgreSQL fallback search failed:", err);
+    } catch (error: any) {
+      console.warn("[RAG] Hybrid search failed:", error.message);
+    }
+  }
+
+  // 4. PostgreSQL Fallback (if ES is sparse)
+  if (contexts.length < 3) {
+    // 4a. pgvector cosine similarity search (primary PG fallback)
+    if (pgVectorAvailable && queryVector) {
+      try {
+        const vectorStr = `[${queryVector.join(",")}]`;
+        const pgChunks: any[] = await prisma.$queryRawUnsafe(
+          `SELECT dc."content", d."title",
+                  1 - (dc."embedding" <=> $1::vector) AS score
+           FROM "DocumentChunk" dc
+           JOIN "Document" d ON dc."documentId" = d."id"
+           WHERE dc."embedding" IS NOT NULL
+           AND (d."userId" IS NULL ${userId ? `OR d."userId" = $2` : ''})
+           ORDER BY dc."embedding" <=> $1::vector
+           LIMIT 5`,
+          vectorStr,
+          ...(userId ? [userId] : [])
+        );
+
+        pgChunks.forEach((chunk: any) => {
+          if (!contexts.some((c) => c.content === chunk.content)) {
+            contexts.push({
+              content: chunk.content,
+              source: chunk.title || "PostgreSQL Vector Search",
+              score: Number(chunk.score) || 0.7,
+            });
+          }
+        });
+      } catch (err: any) {
+        console.warn("[RAG] pgvector search failed:", err.message);
+      }
+    }
+
+    // 4b. Keyword fallback (if pgvector unavailable or still sparse)
+    if (contexts.length < 3) {
+      try {
+        const keywords = extractKeywords(query);
+        if (keywords.length > 0) {
+          const pgDocs = await prisma.document.findMany({
+            where: {
+              AND: [
+                {
+                  OR: keywords.map((word) => ({
+                    content: { contains: word, mode: "insensitive" as const },
+                  })),
+                },
+                {
+                  OR: [
+                    { userId: null },
+                    ...(userId ? [{ userId }] : [])
+                  ]
+                }
+              ]
+            },
+            take: 5,
+          });
+
+          pgDocs.forEach((doc) => {
+            if (!contexts.some((c) => c.content === doc.content)) {
+              contexts.push({
+                content: doc.content,
+                source: doc.title || "PostgreSQL Document",
+                score: 0.5,
+              });
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("[RAG] PostgreSQL keyword fallback search failed:", err);
+      }
     }
   }
 
@@ -287,5 +361,5 @@ export const retrieveContext = async (query: string): Promise<RagContext[]> => {
     });
   }
 
-  return contexts.slice(0, 5);
+  return contexts.slice(0, 15);
 };
