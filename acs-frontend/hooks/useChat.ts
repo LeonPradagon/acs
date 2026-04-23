@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ChatMessage } from "@/types/chat";
-import { aiQueryService, ChatSessionItem } from "@/lib/ai-query.service";
+import { aiQueryService } from "@/lib/ai-query.service";
+import { useChatSessions } from "./useChatSessions";
+import { useChatActions } from "./useChatActions";
 
 interface UseChatOptions {
   onProcessComplete?: (message: ChatMessage) => void;
@@ -23,10 +25,20 @@ export const useChat = (options: UseChatOptions = {}) => {
     options.selectedModel || "openai/gpt-oss-120b",
   );
 
-  // Session Management State
-  const [sessions, setSessions] = useState<ChatSessionItem[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // Compose session management from extracted hook
+  const sessionManager = useChatSessions();
+  const {
+    sessions,
+    currentSessionId,
+    setCurrentSessionId,
+    isSidebarOpen,
+    setIsSidebarOpen,
+    loadSessionsList,
+  } = sessionManager;
+
+  // Compose utility actions from extracted hook
+  const chatActions = useChatActions(chatHistory);
+  const { copyConversation, exportToMarkdown, submitFeedback } = chatActions;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -36,17 +48,6 @@ export const useChat = (options: UseChatOptions = {}) => {
 
   // Stable ref to always access the latest handleProcess
   const handleProcessRef = useRef<typeof handleProcess>(null as any);
-
-  // Function to load all sessions
-  const loadSessionsList = useCallback(async () => {
-    try {
-      const list = await aiQueryService.listSessions();
-      setSessions(list);
-    } catch (err) {
-      console.error("Failed to load sessions:", err);
-    }
-  }, []);
-
 
   // Handle setting welcome message if no history
   useEffect(() => {
@@ -85,47 +86,18 @@ export const useChat = (options: UseChatOptions = {}) => {
     };
   }, []);
 
-  // --- Session Actions ---
+  // --- Delegated Session Actions ---
 
   const handleNewSession = useCallback(async () => {
-    try {
-      const newSession = await aiQueryService.createSession();
-      setCurrentSessionId(newSession.id);
-      setChatHistory([
-        {
-          id: "welcome",
-          content:
-            "Sesi obrolan baru dimulai. Ada yang bisa saya bantu hari ini?",
-          role: "assistant",
-          timestamp: new Date(),
-        },
-      ]);
-      await loadSessionsList();
-    } catch (err) {
-      console.error("Failed to create session", err);
-    }
-  }, [loadSessionsList]);
+    await sessionManager.handleNewSession(setChatHistory);
+  }, [sessionManager]);
 
-  const handleSelectSession = useCallback(async (sessionId: string) => {
-    setCurrentSessionId(sessionId);
-    try {
-      const history = await aiQueryService.loadSessionHistory(sessionId);
-      if (history.length > 0) {
-        setChatHistory(history);
-      } else {
-        setChatHistory([
-          {
-            id: "welcome",
-            content: "Sesi obrolan baru. Silakan ketik pertanyaan Anda.",
-            role: "assistant",
-            timestamp: new Date(),
-          },
-        ]);
-      }
-    } catch (err) {
-      console.error("Failed to load session history", err);
-    }
-  }, []);
+  const handleSelectSession = useCallback(
+    async (sessionId: string) => {
+      await sessionManager.handleSelectSession(sessionId, setChatHistory);
+    },
+    [sessionManager],
+  );
 
   const hasInit = useRef(false);
 
@@ -140,8 +112,7 @@ export const useChat = (options: UseChatOptions = {}) => {
         setApiStatus(isHealthy ? "connected" : "error");
 
         if (isHealthy) {
-          const list = await aiQueryService.listSessions();
-          setSessions(list);
+          await loadSessionsList();
         }
       } catch {
         setApiStatus("error");
@@ -149,22 +120,13 @@ export const useChat = (options: UseChatOptions = {}) => {
     };
 
     initChat();
-  }, [handleSelectSession]);
+  }, [loadSessionsList]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
-      try {
-        await aiQueryService.deleteSession(sessionId);
-        await loadSessionsList();
-        if (currentSessionId === sessionId) {
-          setCurrentSessionId(null);
-          setChatHistory([]);
-        }
-      } catch (err) {
-        console.error("Failed to delete session", err);
-      }
+      await sessionManager.handleDeleteSession(sessionId, setChatHistory);
     },
-    [currentSessionId, loadSessionsList],
+    [sessionManager],
   );
 
   const clearChat = useCallback(() => {
@@ -183,22 +145,12 @@ export const useChat = (options: UseChatOptions = {}) => {
     }
   }, [currentSessionId, handleDeleteSession]);
 
-  const copyConversation = useCallback(() => {
-    const text = chatHistory
-      .map(
-        (msg) => `${msg.role === "user" ? "ANDA" : "ASISTEN"}: ${msg.content}`,
-      )
-      .join("\n\n");
-    navigator.clipboard.writeText(text);
-  }, [chatHistory]);
-
   // --- Stop Generation ---
   const stopGeneration = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
 
-      // Save whatever content was streamed so far as a message
       setStreamingContent((currentContent) => {
         if (currentContent) {
           const partialMessage: ChatMessage = {
@@ -219,7 +171,6 @@ export const useChat = (options: UseChatOptions = {}) => {
 
   // --- Regenerate Last Response ---
   const handleRegenerate = useCallback(async () => {
-    // Find the last user message
     const lastUserIndex = [...chatHistory]
       .reverse()
       .findIndex((m) => m.role === "user");
@@ -228,11 +179,9 @@ export const useChat = (options: UseChatOptions = {}) => {
     const actualIndex = chatHistory.length - 1 - lastUserIndex;
     const lastUserMessage = chatHistory[actualIndex];
 
-    // Remove all messages after (and including) the last assistant response after this user message
     const newHistory = chatHistory.slice(0, actualIndex + 1);
     setChatHistory(newHistory);
 
-    // Re-send the query via ref to avoid stale closure
     handleProcessRef.current(
       lastUserMessage.content,
       "universal",
@@ -243,79 +192,11 @@ export const useChat = (options: UseChatOptions = {}) => {
     );
   }, [chatHistory]);
 
-  // --- Export to Markdown ---
-  const exportToMarkdown = useCallback(() => {
-    const lines: string[] = [];
-    lines.push("# Percakapan ACS AI Assistant");
-    lines.push(`*Diekspor pada ${new Date().toLocaleString("id-ID")}*\n`);
-    lines.push("---\n");
-
-    chatHistory
-      .filter((m) => m.id !== "welcome" && m.id !== "cleared")
-      .forEach((msg) => {
-        const role =
-          msg.role === "user" ? "👤 **Anda**" : "🤖 **ACS AI Assistant**";
-        const time =
-          msg.timestamp instanceof Date
-            ? msg.timestamp.toLocaleTimeString("id-ID", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "";
-        lines.push(`### ${role} ${time ? `_(${time})_` : ""}`);
-        lines.push("");
-        lines.push(msg.content);
-        lines.push("");
-        lines.push("---\n");
-      });
-
-    const blob = new Blob([lines.join("\n")], {
-      type: "text/markdown;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `chat-export-${new Date().toISOString().slice(0, 10)}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, [chatHistory]);
-
-  // --- Feedback ---
-  const submitFeedback = useCallback(
-    async (messageId: string, rating: "thumbs_up" | "thumbs_down") => {
-      try {
-        await aiQueryService.submitFeedback(messageId, rating);
-        return true;
-      } catch (err) {
-        console.error("Failed to submit feedback:", err);
-        return false;
-      }
-    },
-    [],
-  );
-
-  // --- Rename Session ---
-  const handleRenameSession = useCallback(
-    async (sessionId: string, title: string) => {
-      try {
-        await aiQueryService.renameSession(sessionId, title);
-        await loadSessionsList();
-      } catch (err) {
-        console.error("Failed to rename session:", err);
-      }
-    },
-    [loadSessionsList],
-  );
-
   // --- Edit & Re-submit ---
   const handleEditAndResubmit = useCallback(
     async (messageIndex: number, newContent: string) => {
-      // Remove this message and everything after it
       const newHistory = chatHistory.slice(0, messageIndex);
 
-      // Add the edited message
       const editedMessage: ChatMessage = {
         id: Date.now().toString(),
         content: newContent,
@@ -325,7 +206,6 @@ export const useChat = (options: UseChatOptions = {}) => {
       const updatedHistory = [...newHistory, editedMessage];
       setChatHistory(updatedHistory);
 
-      // Re-process with the edited query via ref to avoid stale closure
       handleProcessRef.current(
         newContent,
         "universal",
@@ -342,7 +222,6 @@ export const useChat = (options: UseChatOptions = {}) => {
    * Process a user message with streaming response
    */
   const handleProcess = async (
-    // Keep ref in sync for stale-closure-safe access
     userQuery: string,
     _mode: string,
     _persona: string,
@@ -371,7 +250,7 @@ export const useChat = (options: UseChatOptions = {}) => {
       }
     }
 
-    // Add user message to UI (only if not regenerating — regenerating already has it)
+    // Add user message to UI (only if not regenerating)
     const currentHistory = existingHistory || chatHistory;
     if (!existingHistory) {
       const userMessage: ChatMessage = {
@@ -503,7 +382,7 @@ export const useChat = (options: UseChatOptions = {}) => {
     handleNewSession,
     handleSelectSession,
     handleDeleteSession,
-    handleRenameSession,
+    handleRenameSession: sessionManager.handleRenameSession,
     // New features
     stopGeneration,
     handleRegenerate,

@@ -112,13 +112,13 @@ export const MarkdownText = ({ text }: { text: string }) => {
           ),
           blockquote: ({ node, ...props }) => (
             <blockquote
-              className="border-l-4 border-indigo-500 pl-4 py-1 my-3 text-muted-foreground italic bg-muted/20 rounded-r-md"
+              className="border-l-4 border-primary pl-4 py-1 my-3 text-muted-foreground italic bg-muted/20 rounded-r-md"
               {...props}
             />
           ),
           a: ({ node, ...props }) => (
             <a
-              className="text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+              className="text-primary hover:underline font-medium"
               target="_blank"
               rel="noopener noreferrer"
               {...props}

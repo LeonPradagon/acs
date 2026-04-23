@@ -124,10 +124,7 @@ const META_KEYWORDS = [
   "isi dari",
   "summary",
   "ringkasan",
-  "isi",
   "bacakan",
-  "apa",
-  "tentang",
   "data baru",
   "file baru",
 ];
@@ -149,7 +146,7 @@ function extractKeywords(query: string): string[] {
  * 2. Elasticsearch BM25 (Keyword)
  * with a PostgreSQL fallback.
  */
-export const retrieveContext = async (query: string, userId?: string): Promise<RagContext[]> => {
+export const retrieveContext = async (query: string, userId?: string, divisionId?: string | null, role: string = 'user', clearanceLevel: number = 1): Promise<RagContext[]> => {
   let contexts: RagContext[] = [];
   const queryLower = query.toLowerCase();
 
@@ -171,13 +168,21 @@ export const retrieveContext = async (query: string, userId?: string): Promise<R
   if (isAskingAboutRecent) {
     try {
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      // Determine data isolation filter
+      const accessFilter = role === 'superadmin' 
+        ? {} // Superadmin can see everything
+        : {
+            OR: [
+              { divisionId: null }, // Global docs
+              ...(divisionId ? [{ divisionId }] : []) // Division docs
+            ],
+            clearanceLevel: { lte: clearanceLevel }
+          };
+
       recentDocs = await prisma.document.findMany({
         where: {
           createdAt: { gte: fiveMinutesAgo },
-          OR: [
-            { userId: null },
-            ...(userId ? [{ userId }] : [])
-          ]
+          ...accessFilter
         },
         orderBy: { createdAt: "desc" },
         take: 10,
@@ -189,22 +194,30 @@ export const retrieveContext = async (query: string, userId?: string): Promise<R
 
   // 3. Hybrid Search in Elasticsearch
   if (queryVector) {
-    try {
-      const esResponse = await esClient.search({
+      const esFilter = role === 'superadmin' ? [] : [
+        {
+          bool: {
+            must: [
+              { range: { clearanceLevel: { lte: clearanceLevel } } }
+            ],
+            should: [
+              { bool: { must_not: { exists: { field: "divisionId" } } } },
+              ...(divisionId ? [{ term: { "divisionId.keyword": divisionId } }] : [])
+            ],
+            minimum_should_match: 1
+          }
+        }
+      ];
+
+      try {
+        const esResponse = await esClient.search({
         index: "documents",
         knn: {
           field: "embedding",
           query_vector: queryVector,
           k: 10,
           num_candidates: 100,
-          filter: {
-            bool: {
-              should: [
-                { bool: { must_not: { exists: { field: "userId" } } } },
-                ...(userId ? [{ term: { userId: userId } }] : [])
-              ]
-            }
-          }
+          filter: esFilter.length > 0 ? esFilter[0] : undefined
         },
         query: {
           bool: {
@@ -217,16 +230,7 @@ export const retrieveContext = async (query: string, userId?: string): Promise<R
                 },
               },
             ],
-            filter: [
-              {
-                bool: {
-                  should: [
-                    { bool: { must_not: { exists: { field: "userId" } } } },
-                    ...(userId ? [{ term: { userId: userId } }] : [])
-                  ]
-                }
-              }
-            ]
+            filter: esFilter
           },
         },
         size: 10,
@@ -258,17 +262,31 @@ export const retrieveContext = async (query: string, userId?: string): Promise<R
     if (pgVectorAvailable && queryVector) {
       try {
         const vectorStr = `[${queryVector.join(",")}]`;
+        
+        // Build parameterized query — clearanceLevel uses $3 instead of interpolation
+        const params: any[] = [vectorStr];
+        let paramIdx = 2;
+        
+        let pgWhereClause = '';
+        if (role !== 'superadmin') {
+          const divisionFilter = divisionId ? `OR d."divisionId" = $${paramIdx++}` : '';
+          pgWhereClause = `AND (d."divisionId" IS NULL ${divisionFilter}) AND d."clearanceLevel" <= $${paramIdx}`;
+        }
+
+        const queryParams: any[] = [vectorStr];
+        if (role !== 'superadmin' && divisionId) queryParams.push(divisionId);
+        if (role !== 'superadmin') queryParams.push(clearanceLevel);
+
         const pgChunks: any[] = await prisma.$queryRawUnsafe(
           `SELECT dc."content", d."title",
                   1 - (dc."embedding" <=> $1::vector) AS score
            FROM "DocumentChunk" dc
            JOIN "Document" d ON dc."documentId" = d."id"
            WHERE dc."embedding" IS NOT NULL
-           AND (d."userId" IS NULL ${userId ? `OR d."userId" = $2` : ''})
+           ${pgWhereClause}
            ORDER BY dc."embedding" <=> $1::vector
            LIMIT 5`,
-          vectorStr,
-          ...(userId ? [userId] : [])
+          ...queryParams
         );
 
         pgChunks.forEach((chunk: any) => {
@@ -299,10 +317,13 @@ export const retrieveContext = async (query: string, userId?: string): Promise<R
                   })),
                 },
                 {
-                  OR: [
-                    { userId: null },
-                    ...(userId ? [{ userId }] : [])
-                  ]
+                  ... (role === 'superadmin' ? {} : {
+                    OR: [
+                      { divisionId: null },
+                      ...(divisionId ? [{ divisionId }] : [])
+                    ],
+                    clearanceLevel: { lte: clearanceLevel }
+                  })
                 }
               ]
             },

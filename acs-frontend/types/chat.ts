@@ -227,6 +227,7 @@ export interface ChatMessage {
   files?: ChatFile[];
   images?: string[];
   processingSteps?: string[];
+  attachments?: { format: string; filename: string; payload: string }[];
 }
 
 export interface AdvancedVisualResponse {

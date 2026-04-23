@@ -7,12 +7,26 @@ import { prisma, esClient } from "../config/db";
 
 export const getUsers = async (req: Request, res: Response) => {
   try {
+    const currentUser = (req as any).user;
+    
+    // Filter users: superadmin sees all, division_admin sees only users in their division
+    let whereFilter = {};
+    if (currentUser?.role !== "superadmin" && currentUser?.divisionId) {
+      whereFilter = {
+        divisionId: currentUser.divisionId
+      };
+    }
+
     const users = await prisma.user.findMany({
+      where: whereFilter,
       select: {
         id: true,
         email: true,
         name: true,
         role: true,
+        divisionId: true,
+        division: { select: { name: true } },
+        clearanceLevel: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
@@ -49,6 +63,51 @@ export const updateUserRole = async (req: Request, res: Response) => {
   }
 };
 
+export const updateUserSecurity = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { clearanceLevel, divisionId } = req.body;
+    
+    let finalDivisionId = divisionId || null;
+    if (finalDivisionId) {
+        // Check if it's NOT a UUID (if it's a name like "HRD")
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(finalDivisionId);
+        
+        if (!isUuid) {
+            let div = await prisma.division.findFirst({
+                where: { name: { equals: finalDivisionId, mode: "insensitive" } }
+            });
+            if (!div) {
+                div = await prisma.division.create({
+                    data: { name: finalDivisionId.toUpperCase() }
+                });
+            }
+            finalDivisionId = div.id;
+        }
+    }
+
+    const user = await prisma.user.update({
+      where: { id },
+      data: { 
+        clearanceLevel: clearanceLevel ? parseInt(clearanceLevel) : 1, 
+        divisionId: finalDivisionId 
+      },
+      select: { 
+        id: true, 
+        email: true, 
+        name: true, 
+        role: true, 
+        clearanceLevel: true, 
+        divisionId: true,
+        division: { select: { name: true } }
+      },
+    });
+    res.json({ success: true, data: user });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 export const deleteUser = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -58,9 +117,35 @@ export const deleteUser = async (req: Request, res: Response) => {
     if (currentUser?.userId === id) {
       return res.status(403).json({ success: false, error: "You cannot delete your own account." });
     }
-    
-    await prisma.user.delete({ where: { id } });
-    res.json({ success: true, message: "User deleted successfully." });
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found." });
+    }
+
+    // Soft delete: deactivate the user instead of hard deleting
+    // This preserves documents and audit trail
+    await prisma.$transaction(async (tx) => {
+      // Deactivate user
+      await tx.user.update({
+        where: { id },
+        data: {
+          role: "user",
+          name: `[DELETED] ${user.name || user.email}`,
+          clearanceLevel: 0,
+        },
+      });
+
+      // Clean up sessions (these are safe to delete)
+      await tx.chatSession.deleteMany({ where: { userId: id } });
+
+      // Revoke email connection if exists
+      await tx.emailConnection.deleteMany({ where: { userId: id } });
+    });
+
+    console.log(`[Admin] User ${id} (${user.email}) soft-deleted by ${currentUser?.userId}`);
+    res.json({ success: true, message: "User deactivated successfully." });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -72,17 +157,34 @@ export const deleteUser = async (req: Request, res: Response) => {
 
 export const getAllDocuments = async (req: Request, res: Response) => {
   try {
+    const currentUser = (req as any).user;
+    
+    let whereFilter = {};
+    if (currentUser?.role !== "superadmin") {
+      whereFilter = {
+        OR: [
+          { divisionId: null },
+          // if user belongs to a division, they can see their division's documents
+          ...(currentUser?.divisionId ? [{ divisionId: currentUser.divisionId }] : [])
+        ]
+      };
+    }
+
     const docs = await prisma.document.findMany({
+      where: whereFilter,
       include: {
         user: { select: { email: true, name: true } },
+        division: { select: { name: true } },
       },
       orderBy: { createdAt: "desc" },
     });
     
-    // Calculate global vs private
+    // Calculate global vs private/division
     const enrichedDocs = docs.map(doc => ({
       ...doc,
-      visibility: doc.userId ? "Private (Email)" : "Global (Public)",
+      visibility: doc.division 
+        ? `Div: ${doc.division.name}` 
+        : (doc.userId ? "Private (User)" : "Global (Public)"),
     }));
     
     res.json({ success: true, data: enrichedDocs });
@@ -95,22 +197,159 @@ export const deleteDocument = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
-    // 1. Delete chunks from Elasticsearch gracefully
+    // 0. Verify document exists
+    const doc = await prisma.document.findUnique({ where: { id }, select: { id: true, title: true } });
+    if (!doc) {
+      return res.status(404).json({ success: false, error: "Document not found." });
+    }
+
+    // 1. Delete chunks from Elasticsearch (best-effort, don't block on failure)
+    let esDeletedCount = 0;
     try {
-      await esClient.deleteByQuery({
+      const esResult = await esClient.deleteByQuery({
         index: "documents",
+        refresh: true,  // Ensure consistency immediately
         query: { term: { database_id: id } }
       });
-      console.log(`[Admin] Deleted ES chunks for doc: ${id}`);
-    } catch (esErr) {
-      console.warn(`[Admin] ES Cleanup warning for ${id}:`, esErr);
+      esDeletedCount = Number(esResult.deleted) || 0;
+      console.log(`[Admin] Deleted ${esDeletedCount} ES chunks for doc: ${id} (${doc.title})`);
+    } catch (esErr: any) {
+      // ES might be down — log but don't fail the operation
+      console.warn(`[Admin] ES Cleanup warning for ${id}: ${esErr.message}`);
     }
-    
-    // 2. PostgreSQL Cascade will automatically delete DocumentChunk vectors
+
+    // 2. Delete from PG — cascade will remove DocumentChunk vectors
+    const pgChunkCount = await prisma.documentChunk.count({ where: { documentId: id } });
     await prisma.document.delete({ where: { id } });
     
-    res.json({ success: true, message: "Document completely removed from Knowledge Base." });
+    console.log(`[Admin] Deleted doc ${id} (${doc.title}) — ${pgChunkCount} PG chunks, ${esDeletedCount} ES chunks`);
+    res.json({ 
+      success: true, 
+      message: "Document completely removed from Knowledge Base.",
+      details: { pgChunksDeleted: pgChunkCount, esChunksDeleted: esDeletedCount }
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+// ==========================================
+// System Settings Logic
+// ==========================================
+
+export const getSystemSettings = async (req: Request, res: Response) => {
+  try {
+    const settings = await prisma.systemSetting.findMany();
+    // Convert to key-value object
+    const settingsObj = settings.reduce((acc: any, curr: any) => {
+      acc[curr.key] = curr.value;
+      return acc;
+    }, {});
+    
+    // Default ERP_CONNECTION_MODE to DB if not set
+    if (!settingsObj["ERP_CONNECTION_MODE"]) {
+      settingsObj["ERP_CONNECTION_MODE"] = "DB";
+    }
+
+    res.json({ success: true, data: settingsObj });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const updateSystemSetting = async (req: Request, res: Response) => {
+  try {
+    const { key, value } = req.body;
+    
+    if (!key || typeof value === "undefined") {
+      return res.status(400).json({ success: false, error: "Key and value are required." });
+    }
+
+    await prisma.systemSetting.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value },
+    });
+
+    res.json({ success: true, message: `Setting ${key} updated successfully.` });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Validate that a URL doesn't point to internal/private network (SSRF protection).
+ */
+function isUrlSafe(urlString: string): boolean {
+  try {
+    const parsed = new URL(urlString);
+    const hostname = parsed.hostname.toLowerCase();
+    
+    // Block internal addresses
+    const blockedPatterns = [
+      /^localhost$/,
+      /^127\./,
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[01])\./,
+      /^192\.168\./,
+      /^169\.254\./,
+      /^0\.0\.0\.0$/,
+      /^::1$/,
+      /^fc00:/,
+      /^fe80:/,
+    ];
+    
+    if (blockedPatterns.some(p => p.test(hostname))) return false;
+    if (!["http:", "https:", "postgresql:", "postgres:"].includes(parsed.protocol)) return false;
+    
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const testConnection = async (req: Request, res: Response) => {
+  try {
+    const { mode, url, apiKey } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ success: false, error: "URL is required" });
+    }
+
+    // SSRF Protection: block connections to internal networks
+    if (!isUrlSafe(url)) {
+      return res.status(400).json({ success: false, error: "Connection to internal/private network addresses is not allowed." });
+    }
+
+    if (mode === "DB") {
+      const { Pool } = require("pg");
+      const pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000 });
+      try {
+        await pool.query("SELECT 1");
+        return res.json({ success: true, message: "Database connection successful!" });
+      } catch (err: any) {
+        return res.json({ success: false, error: err.message });
+      } finally {
+        await pool.end().catch(() => {});
+      }
+    } else if (mode === "API") {
+      const axios = require("axios");
+      try {
+        const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+        await axios.get(url, { headers, timeout: 5000, maxRedirects: 2 });
+        return res.json({ success: true, message: "API connection successful!" });
+      } catch (err: any) {
+        if (err.response) {
+            return res.json({ success: true, message: `API reached (Status: ${err.response.status})` });
+        }
+        return res.json({ success: false, error: err.message });
+      }
+    }
+
+    return res.status(400).json({ success: false, error: "Invalid mode. Use 'DB' or 'API'." });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+

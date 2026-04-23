@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { v4 as uuidv4 } from "uuid";
 import chatRoutes from "./routes/chat.routes";
@@ -8,6 +9,7 @@ import authRoutes from "./routes/auth.routes";
 import documentRoutes from "./routes/document.routes";
 import healthRoutes from "./routes/health.routes";
 import adminRoutes from "./routes/admin.routes";
+import emailRoutes from "./routes/email.routes";
 import { prisma, esClient, testConnections } from "./config/db";
 import { redisConnection } from "./config/redis";
 import { documentWorker } from "./workers/document.worker";
@@ -16,8 +18,6 @@ import { requestLogger } from "./middleware/logger.middleware";
 import { env } from "./common/env";
 import { EmbeddingService } from "./services/embedding.service";
 
-// Initialize BullMQ Worker
-import "./workers/document.worker";
 
 const app = express();
 
@@ -28,10 +28,32 @@ const app = express();
 // Helmet — set secure HTTP headers
 app.use(helmet());
 
-// CORS — use env-based origins instead of wildcard
+// CORS — whitelist production domains, fallback open for dev/unknown
 app.use(
   cors({
-    origin: env.ALLOWED_ORIGINS,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+
+      // Always allow *.asiasistem.com (production)
+      if (origin.endsWith(".asiasistem.com") || origin.endsWith(".asiasistem.co.id")) {
+        return callback(null, true);
+      }
+
+      // Allow configured origins from .env (ALLOWED_ORIGINS)
+      if (env.ALLOWED_ORIGINS.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // Allow all localhost (development)
+      if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
+        return callback(null, true);
+      }
+
+      // Fallback: allow everything (open mode)
+      // Remove this block if you want to strictly block unknown origins
+      return callback(null, true);
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
@@ -44,6 +66,7 @@ app.use(
 );
 
 app.use(express.json({ limit: "1mb" }));
+app.use(cookieParser()); // A7: Parse httpOnly cookies for refresh token
 
 // ============================================================
 // Request ID Middleware
@@ -62,10 +85,10 @@ app.use(requestLogger);
 // Rate Limiting
 // ============================================================
 
-// Global Rate Limiter — 100 requests per 15 minutes per IP
+// Global Rate Limiter — 500 requests per 15 minutes per IP
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 500,
   message: {
     error: "Terlalu banyak permintaan. Silakan coba lagi dalam beberapa menit.",
   },
@@ -95,13 +118,15 @@ app.use("/api/chat", chatLimiter, chatRoutes);
 app.use("/api/rag", documentRoutes);
 app.use("/api/health", healthRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/email", emailRoutes);
 
+// Global Error Handler (must be before 404 to catch thrown errors)
+app.use(errorMiddleware);
+
+// 404 Fallback — must be last
 app.use((req, res) => {
   res.status(404).json({ error: "Endpoint not found" });
 });
-
-// Global Error Handler
-app.use(errorMiddleware);
 
 // ============================================================
 // Server Startup

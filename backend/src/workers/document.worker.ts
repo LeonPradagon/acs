@@ -1,7 +1,7 @@
 import { Worker, Job } from "bullmq";
 import fs from "fs";
 import { redisConnection } from "../config/redis";
-import { DOCUMENT_QUEUE_NAME } from "../config/queue";
+import { DOCUMENT_QUEUE_NAME, deadLetterQueue } from "../config/queue";
 import { prisma, esClient, pgVectorAvailable } from "../config/db";
 import { DocumentExtractorService } from "../services/document-extractor.service";
 import { EmbeddingService } from "../services/embedding.service";
@@ -13,7 +13,7 @@ export const documentWorker = new Worker(
   async (job: Job) => {
     const { documentId, filePath, originalname, mimetype } = job.data;
     console.log(
-      `[Worker] Started processing document ${documentId} (${originalname})`,
+      `[Worker] Started processing document ${documentId} (${originalname}) — Attempt ${job.attemptsMade + 1}`,
     );
 
     try {
@@ -25,17 +25,22 @@ export const documentWorker = new Worker(
 
       // 2. Extract Content
       let content = "";
-      try {
-        content = await DocumentExtractorService.extractHybrid(
-          filePath,
-          mimetype,
-        );
-      } catch (extractError: any) {
-        console.error(
-          `[Worker] Extraction error for ${originalname}:`,
-          extractError,
-        );
-        throw new Error(`Extraction failed: ${extractError.message}`);
+      if (job.data.skipExtraction) {
+        const existingDoc = await prisma.document.findUnique({ where: { id: documentId } });
+        content = existingDoc?.content || "";
+      } else {
+        try {
+          content = await DocumentExtractorService.extractHybrid(
+            filePath,
+            mimetype,
+          );
+        } catch (extractError: any) {
+          console.error(
+            `[Worker] Extraction error for ${originalname}:`,
+            extractError,
+          );
+          throw new Error(`Extraction failed: ${extractError.message}`);
+        }
       }
 
       // 3. Update DB with content
@@ -49,6 +54,9 @@ export const documentWorker = new Worker(
       console.log(
         `[Worker] Split ${originalname} into ${chunks.length} chunks (semantic).`,
       );
+
+      // Report progress for long-running jobs
+      await job.updateProgress(10);
 
       // Collect all embeddings for both ES and PG indexing
       const allEmbeddings: number[][] = [];
@@ -76,12 +84,19 @@ export const documentWorker = new Worker(
             category: doc.category,
             classification: doc.classification,
             tags: doc.tags,
+            userId: doc.userId,
+            divisionId: doc.divisionId,
+            clearanceLevel: doc.clearanceLevel,
             database_id: doc.id,
             chunk_index: chunkIndex,
             timestamp: new Date(),
             embedding: embeddings[j],
           });
         }
+
+        // Report progress
+        const progress = 10 + Math.round((i / chunks.length) * 70);
+        await job.updateProgress(progress);
       }
 
       // 4a. Index to Elasticsearch
@@ -95,6 +110,8 @@ export const documentWorker = new Worker(
           `[Worker] ES indexing failed for ${originalname}: ${esError.message}`,
         );
       }
+
+      await job.updateProgress(85);
 
       // 4b. Store chunks + embeddings in PostgreSQL
       try {
@@ -152,28 +169,33 @@ export const documentWorker = new Worker(
       });
 
       // 6. Cleanup uploaded file to save disk space
-      try {
-        await fs.promises.unlink(filePath);
-        console.log(`[Worker] Cleaned up file: ${filePath}`);
-      } catch (cleanupErr) {
-        console.warn(
-          `[Worker] Failed to cleanup file ${filePath}:`,
-          cleanupErr,
-        );
+      if (!job.data.skipExtraction && filePath) {
+        try {
+          await fs.promises.unlink(filePath);
+          console.log(`[Worker] Cleaned up file: ${filePath}`);
+        } catch (cleanupErr) {
+          console.warn(
+            `[Worker] Failed to cleanup file ${filePath}:`,
+            cleanupErr,
+          );
+        }
       }
 
+      await job.updateProgress(100);
       console.log(`[Worker] Successfully completed document ${documentId}`);
       return { success: true, chunks: chunks.length };
     } catch (error: any) {
       console.error(
-        `[Worker] Failed processing document ${documentId}:`,
-        error,
+        `[Worker] Failed processing document ${documentId} (attempt ${job.attemptsMade + 1}):`,
+        error.message,
       );
-      // Update status to FAILED
-      await prisma.document.update({
-        where: { id: documentId },
-        data: { status: "FAILED" },
-      });
+      // Update status to FAILED only on final attempt
+      if (job.attemptsMade + 1 >= (job.opts.attempts || 3)) {
+        await prisma.document.update({
+          where: { id: documentId },
+          data: { status: "FAILED" },
+        });
+      }
       throw error;
     }
   },
@@ -187,6 +209,23 @@ documentWorker.on("completed", (job) => {
   console.log(`[Worker] Job ${job.id} has completed!`);
 });
 
-documentWorker.on("failed", (job, err) => {
+documentWorker.on("failed", async (job, err) => {
   console.log(`[Worker] Job ${job?.id} has failed with ${err.message}`);
+  
+  // SC5: Move to Dead Letter Queue after all retries exhausted
+  if (job && (job.attemptsMade >= (job.opts.attempts || 3))) {
+    try {
+      await deadLetterQueue.add("failed-document", {
+        originalJobId: job.id,
+        documentId: job.data.documentId,
+        originalname: job.data.originalname,
+        error: err.message,
+        failedAt: new Date().toISOString(),
+        attempts: job.attemptsMade,
+      });
+      console.log(`[Worker] Job ${job.id} moved to Dead Letter Queue`);
+    } catch (dlqErr) {
+      console.error(`[Worker] Failed to move job to DLQ:`, dlqErr);
+    }
+  }
 });

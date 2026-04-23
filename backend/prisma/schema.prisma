@@ -8,14 +8,18 @@ datasource db {
 }
 
 model User {
-  id        String     @id @default(uuid())
-  email     String     @unique
-  password  String
-  name      String?
-  role      String     @default("user")
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  documents Document[]
+  id              String            @id @default(uuid())
+  email           String            @unique
+  password        String
+  name            String?
+  role            String            @default("user") // "superadmin", "admin", "user"
+  divisionId      String?
+  division        Division?         @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  clearanceLevel  Int               @default(1) // 1: Staff, 2: Supervisor, 3: Manager, etc.
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  documents       Document[]
+  emailConnection EmailConnection?
 }
 
 model Document {
@@ -29,6 +33,9 @@ model Document {
   status         String          @default("COMPLETED") // PENDING, PROCESSING, COMPLETED, FAILED
   userId         String? // Ownership for private docs (like emails)
   user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  divisionId     String? // Division ownership, if null it's considered a Global document
+  division       Division?       @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  clearanceLevel Int             @default(1)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   chunks         DocumentChunk[]
@@ -55,6 +62,8 @@ model ChatSession {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   messages      ChatHistory[]
+
+  @@index([userId])
 }
 
 model ChatHistory {
@@ -66,6 +75,9 @@ model ChatHistory {
   files     Json?
   createdAt DateTime      @default(now())
   feedback  ChatFeedback?
+
+  @@index([sessionId])
+  @@index([createdAt])
 }
 
 model ChatFeedback {
@@ -76,4 +88,59 @@ model ChatFeedback {
   rating    String // "thumbs_up" or "thumbs_down"
   comment   String?
   createdAt DateTime    @default(now())
+}
+
+/// Stores encrypted OAuth tokens for email integration (Outlook/Microsoft Graph).
+/// Tokens are encrypted with AES-256-GCM before storage.
+model EmailConnection {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String   @default("microsoft") // "microsoft" | "google" (future)
+  encryptedTokens String   // AES-256-GCM encrypted JSON {accessToken, refreshToken, expiresAt}
+  email           String   // Connected email address (e.g. user@outlook.com)
+  scopes          String[] // Granted OAuth scopes
+  connectedAt     DateTime @default(now())
+  lastSyncAt      DateTime?
+  status          String   @default("active") // "active" | "expired" | "revoked"
+}
+
+model Division {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  description String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  users       User[]
+  documents   Document[]
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ==========================================
+// MOCK ERP DATABASE (Testing only)
+// ==========================================
+model ErpEmployee {
+  id           String      @id @default(uuid())
+  firstName    String
+  lastName     String
+  divisionName String
+  jobTitle     String
+  hireDate     DateTime
+  status       String      @default("ACTIVE") // ACTIVE, INACTIVE
+  salaries     ErpSalary[]
+}
+
+model ErpSalary {
+  id             String      @id @default(uuid())
+  employeeId     String
+  employee       ErpEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  baseSalary     Float
+  allowance      Float       @default(0)
+  currency       String      @default("IDR")
+  effectiveDate  DateTime
 }

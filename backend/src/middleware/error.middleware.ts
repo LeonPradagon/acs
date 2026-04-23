@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { AppError } from "../common/errors";
 import { ZodError } from "zod";
+import { env } from "../common/env";
 
 /**
  * Global error handling middleware for Express.
@@ -42,6 +43,6 @@ export const errorMiddleware = (
   res.status(statusCode).json({
     success: false,
     error: message,
-    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+    stack: env.NODE_ENV === "development" ? err.stack : undefined,
   });
 };

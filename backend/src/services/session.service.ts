@@ -69,6 +69,12 @@ export class SessionService {
       throw new NotFoundError("Session");
     }
 
+    // Reject if session belongs to a user but requestor is not authenticated
+    if (session.userId && !userId) {
+      throw new ForbiddenError("Authentication required to access this session");
+    }
+
+    // Reject if session belongs to a different user
     if (session.userId && userId && session.userId !== userId) {
       throw new ForbiddenError("Not authorized to access this session");
     }
@@ -105,14 +111,38 @@ export class SessionService {
 
   /**
    * Load chat history for a session with ownership check.
+   * SC4: Supports cursor-based pagination for large conversations.
    */
-  static async getChatHistory(sessionId: string, userId?: string) {
+  static async getChatHistory(
+    sessionId: string,
+    userId?: string,
+    options: { cursor?: string; limit?: number } = {},
+  ) {
     await this._getSessionAndVerify(sessionId, userId);
 
-    return prisma.chatHistory.findMany({
+    const limit = Math.min(options.limit || 50, 100);
+
+    const messages = await prisma.chatHistory.findMany({
       where: { sessionId },
       orderBy: { createdAt: "asc" },
+      ...(options.cursor
+        ? { cursor: { id: options.cursor }, skip: 1 }
+        : {}),
+      take: limit + 1, // Fetch 1 extra to detect hasMore
     });
+
+    const hasMore = messages.length > limit;
+    const data = hasMore ? messages.slice(0, limit) : messages;
+    const nextCursor = hasMore ? data[data.length - 1]?.id : undefined;
+
+    return {
+      messages: data,
+      pagination: {
+        hasMore,
+        nextCursor,
+        count: data.length,
+      },
+    };
   }
 
   /**

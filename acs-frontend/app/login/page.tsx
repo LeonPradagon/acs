@@ -285,13 +285,13 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Decorative Background Elements - Light Theme Aligned */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-[120px] animate-pulse"></div>
+      {/* Decorative Background Elements */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 dark:bg-primary/20 rounded-full blur-[120px] animate-pulse"></div>
       <div
-        className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary/10 rounded-full blur-[120px] animate-pulse"
+        className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary/15 dark:bg-primary/10 rounded-full blur-[120px] animate-pulse"
         style={{ animationDelay: "2s" }}
       ></div>
-      <div className="absolute top-[20%] right-[10%] w-[20%] h-[20%] bg-primary/5 rounded-full blur-[80px]"></div>
+      <div className="absolute top-[20%] right-[10%] w-[20%] h-[20%] bg-primary/10 dark:bg-primary/5 rounded-full blur-[80px]"></div>
 
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
@@ -299,9 +299,9 @@ export default function LoginPage() {
         transition={{ duration: 0.6, ease: "easeOut" }}
         className="max-w-md w-full relative z-10"
       >
-        <div className="bg-card/70 backdrop-blur-xl border border-border rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.05)] p-7 space-y-6 overflow-hidden relative">
+        <div className="bg-card/70 dark:bg-[var(--surface-container-low)]/80 backdrop-blur-xl border border-border dark:border-primary/20 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.05)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-7 space-y-6 overflow-hidden relative">
           {/* Subtle overlay gradient */}
-          <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none"></div>
+          <div className="absolute inset-0 bg-gradient-to-br from-white/40 dark:from-white/5 to-transparent pointer-events-none"></div>
 
           {/* Token expiry indicator */}
           <AnimatePresence>
@@ -346,7 +346,7 @@ export default function LoginPage() {
                 priority
               />
             </motion.div>
-            <h2 className="mt-4 text-2xl font-black text-foreground tracking-tight">
+            <h2 className="mt-4 text-2xl font-black text-slate-800 dark:text-foreground tracking-tight">
               {appName.split(" ")[0]}{" "}
               <span className="text-primary">
                 {appName.split(" ").slice(1).join(" ")}
@@ -373,7 +373,7 @@ export default function LoginPage() {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="name@company.com"
-                  className="w-full bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground/50 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white outline-none transition-all"
+                  className="w-full bg-muted/30 dark:bg-muted/10 border border-border text-foreground placeholder:text-muted-foreground/50 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white dark:focus:bg-[var(--surface-container-highest)] outline-none transition-all"
                   disabled={isLoading}
                 />
               </div>
@@ -401,7 +401,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full bg-muted/30 border border-border text-foreground placeholder:text-muted-foreground/50 rounded-xl py-2.5 pl-10 pr-10 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white outline-none transition-all"
+                  className="w-full bg-muted/30 dark:bg-muted/10 border border-border text-foreground placeholder:text-muted-foreground/50 rounded-xl py-2.5 pl-10 pr-10 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white dark:focus:bg-[var(--surface-container-highest)] outline-none transition-all"
                   disabled={isLoading}
                 />
                 <button

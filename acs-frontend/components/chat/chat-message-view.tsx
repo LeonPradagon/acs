@@ -24,6 +24,7 @@ import {
   OntologyAnalysisContent,
 } from "./visualization-panel";
 import { MessageMetadata } from "./message-metadata";
+import { DownloadAttachmentCard } from "../ui/download-attachment-card";
 import { AVAILABLE_MODELS } from "@/constants/ai-config";
 
 interface ChatMessageViewProps {
@@ -52,6 +53,7 @@ export const ChatMessageView = ({
   onFeedback,
   onEditAndResubmit,
   userName = "User",
+  isProcessing = false,
 }: ChatMessageViewProps) => {
   const isAssistant = message.role === "assistant";
   const isUser = message.role === "user";
@@ -132,7 +134,7 @@ export const ChatMessageView = ({
   return (
     <div
       className={cn(
-        "flex flex-col w-full max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 mb-10 group/msg",
+        "flex flex-col w-full max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 mb-12 group/msg",
         message.role === "user" ? "items-end" : "items-start",
       )}
     >
@@ -144,20 +146,20 @@ export const ChatMessageView = ({
       >
         <div
           className={cn(
-            "w-9 h-9 flex items-center justify-center rounded-xl flex-shrink-0 mt-0.5 transition-all duration-300 overflow-hidden",
+            "w-10 h-10 flex items-center justify-center rounded-[14px] flex-shrink-0 mt-0.5 transition-all duration-500 overflow-hidden shadow-sm",
             isAssistant
-              ? "bg-transparent"
-              : "bg-muted text-muted-foreground border border-border/40 shadow-sm",
+              ? "bg-white/80 dark:bg-[var(--surface-container-lowest)] border border-border/50 p-1 rounded-full dark:shadow-[0_0_15px_rgba(255,145,89,0.1)]"
+              : "bg-gradient-to-br from-primary/80 to-primary text-primary-foreground shadow-[0_4px_10px_rgba(255,145,89,0.2)]",
           )}
         >
           {isAssistant ? (
             <img
               src="/images/Asisgo.png"
               alt="AI"
-              className="w-full h-full object-contain"
+              className="w-full h-full object-contain drop-shadow-sm scale-110"
             />
           ) : (
-            <User className="w-5 h-5" />
+            <User className="w-5 h-5 text-white" />
           )}
         </div>
 
@@ -173,7 +175,7 @@ export const ChatMessageView = ({
               "flex items-center gap-2.5 text-[10px] uppercase font-bold tracking-[0.1em]",
               message.role === "user"
                 ? "justify-end text-muted-foreground/60"
-                : "justify-start text-indigo-600/80",
+                : "justify-start text-primary/80",
             )}
           >
             <span>{isAssistant ? "ACS AI Assistant" : userName}</span>
@@ -194,8 +196,8 @@ export const ChatMessageView = ({
             className={cn(
               "text-[15px] leading-[1.7] text-foreground font-light tracking-tight",
               isAssistant
-                ? "bg-transparent"
-                : "bg-card border border-border/50 p-4 rounded-2xl rounded-tr-none shadow-sm",
+                ? "bg-transparent py-1"
+                : "bg-[var(--surface-container-highest)] dark:bg-[var(--surface-variant)] p-5 rounded-[1.5rem] rounded-tr-sm shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.2)]",
             )}
           >
             {isEditing ? (
@@ -226,7 +228,7 @@ export const ChatMessageView = ({
                     size="sm"
                     onClick={confirmEdit}
                     disabled={!editContent.trim()}
-                    className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                    className="h-7 text-xs bg-primary hover:bg-primary/80 text-primary-foreground"
                   >
                     Kirim Ulang
                   </Button>
@@ -234,7 +236,14 @@ export const ChatMessageView = ({
               </div>
             ) : isAssistant ? (
               <div className="prose prose-purple prose-sm max-w-none dark:prose-invert">
-                <MessageContentRouter message={message} />
+                {isProcessing && (!message.content || message.content === "") ? (
+                  <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-muted-foreground bg-[var(--surface-variant)]/50 px-3 py-1.5 rounded-full w-max">
+                    <span className="animate-spin w-3 h-3 border-2 border-primary border-t-transparent rounded-full"></span>
+                    Analyzing...
+                  </div>
+                ) : (
+                  <MessageContentRouter message={message} />
+                )}
               </div>
             ) : (
               <div className="space-y-3">
@@ -386,18 +395,46 @@ export const ChatMessageView = ({
 };
 
 /**
+ * Strip <EXPORT_DATA>...</EXPORT_DATA> blocks from displayed content
+ */
+const cleanExportBlocks = (text: string) =>
+  text.replace(/<EXPORT_DATA>[\s\S]*?<\/EXPORT_DATA>/g, "").trim();
+
+/**
+ * Render attachment download cards if message has attachments
+ */
+const AttachmentCards = ({ message }: { message: ChatMessage }) => {
+  if (!message.attachments || message.attachments.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      {message.attachments.map((att, idx) => (
+        <DownloadAttachmentCard
+          key={`${att.filename}-${idx}`}
+          format={att.format}
+          filename={att.filename}
+          base64Payload={att.payload}
+        />
+      ))}
+    </div>
+  );
+};
+
+/**
  * Internal component to route different types of assistant content
  */
 const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
   const hasSources = message.sources && message.sources.length > 0;
   const hasVisualization = message.analysis_results || message.visualization;
   const hasOntology = message.ontology_data;
+  const hasAttachments = message.attachments && message.attachments.length > 0;
   const queryType = message.enhanced_metadata?.query_type;
+  const displayContent = cleanExportBlocks(message.content);
 
   if (hasOntology) {
     return (
       <div className="space-y-6">
         <OntologyAnalysisContent message={message} />
+        {hasAttachments && <AttachmentCards message={message} />}
         <MessageMetadata message={message} />
         {hasSources && <SourceList sources={message.sources!} />}
       </div>
@@ -409,6 +446,7 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
       return (
         <div className="space-y-6">
           {hasVisualization && <VisualAnalysisContent message={message} />}
+          {hasAttachments && <AttachmentCards message={message} />}
           <MessageMetadata message={message} />
           {hasSources && <SourceList sources={message.sources!} />}
         </div>
@@ -416,7 +454,8 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
     case "text_response":
       return (
         <div className="space-y-6">
-          <MarkdownText text={message.content} />
+          <MarkdownText text={displayContent} />
+          {hasAttachments && <AttachmentCards message={message} />}
           <MessageMetadata message={message} />
           {hasSources && <SourceList sources={message.sources!} />}
         </div>
@@ -425,7 +464,8 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
       return (
         <div className="space-y-6">
           {hasVisualization && <VisualAnalysisContent message={message} />}
-          <MarkdownText text={message.content} />
+          <MarkdownText text={displayContent} />
+          {hasAttachments && <AttachmentCards message={message} />}
           <MessageMetadata message={message} />
           {hasSources && <SourceList sources={message.sources!} />}
         </div>

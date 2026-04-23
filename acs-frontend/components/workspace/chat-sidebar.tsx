@@ -16,8 +16,14 @@ import {
   Zap,
   HelpCircle,
   ChevronRight,
-  Search
+  Search,
+  Mail,
+  Sun,
+  Moon,
+  Database,
+  Shield,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button"; // Hanya dipakai untuk tombol utama, bukan trigger dropdown
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -42,6 +48,7 @@ interface ChatSidebarProps {
   onRenameSession?: (id: string, title: string) => void;
   isAdmin?: boolean;
   onOpenSettings?: () => void;
+  onOpenEmailSettings?: () => void;
   userName?: string;
   handleLogout?: () => void;
 }
@@ -57,6 +64,7 @@ export function ChatSidebar({
   onRenameSession,
   isAdmin,
   onOpenSettings,
+  onOpenEmailSettings,
   userName,
   handleLogout,
 }: ChatSidebarProps) {
@@ -65,8 +73,17 @@ export function ChatSidebar({
   const [searchQuery, setSearchQuery] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
 
-  const filteredSessions = sessions.filter(session => 
-    (session.title || "New Chat").toLowerCase().includes(searchQuery.toLowerCase())
+  const { theme, setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const filteredSessions = sessions.filter((session) =>
+    (session.title || "New Chat")
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase()),
   );
 
   useEffect(() => {
@@ -121,28 +138,43 @@ export function ChatSidebar({
         {/* Sliding Inner Panel */}
         <div
           className={cn(
-            "absolute inset-y-0 left-0 flex flex-col border-r border-border/50 bg-background/95 backdrop-blur-md lg:bg-muted/30 transition-all duration-300 ease-in-out shadow-2xl lg:shadow-none overflow-hidden",
-            isOpen ? "w-[280px] md:w-[300px]" : "w-[280px] md:w-[300px] -translate-x-full lg:translate-x-0 lg:w-[80px]"
+            "absolute inset-y-0 left-0 h-full flex flex-col bg-[var(--surface-container-low)]/95 backdrop-blur-2xl lg:bg-[var(--surface-container-low)]/80 transition-all duration-300 ease-in-out shadow-[12px_0_40px_rgba(45,52,51,0.04)] overflow-hidden",
+            isOpen
+              ? "w-[280px] md:w-[300px]"
+              : "w-[280px] md:w-[300px] -translate-x-full lg:translate-x-0 lg:w-[80px]",
           )}
         >
-          {/* Sidebar Header */}
-          <div className="p-4 flex flex-col gap-3">
+          {/* Sidebar Header — fixed at top */}
+          <div className="p-4 flex flex-col gap-3 shrink-0">
             <Button
               onClick={onNewSession}
               variant="outline"
               className={cn(
-                 "gap-2 font-semibold border-indigo-500/20 bg-background text-indigo-500 hover:bg-indigo-500/5 transition-all shadow-sm h-11 rounded-xl group overflow-hidden",
-                 isOpen ? "w-full justify-start px-4" : "w-11 h-11 px-0 justify-center mx-auto"
+                "gap-2 font-semibold border-none bg-muted/40 hover:bg-muted/80 text-foreground dark:bg-white/5 dark:hover:bg-white/10 dark:text-foreground dark:border dark:border-white/5 shadow-[0_4px_12px_rgba(0,0,0,0.02)] transition-all ease-out duration-300 h-11 rounded-full group overflow-hidden",
+                isOpen
+                  ? "w-full justify-start px-4"
+                  : "w-11 h-11 px-0 justify-center mx-auto",
               )}
             >
-              <div className="p-1 rounded-md bg-indigo-500/10 text-indigo-500 group-hover:bg-indigo-500 group-hover:text-white transition-colors shrink-0">
+              <div className="p-1 rounded-full bg-primary text-primary-foreground group-hover:scale-110 group-hover:shadow-[0_0_15px_rgba(255,145,89,0.5)] transition-all shrink-0">
                 <Plus className="w-4 h-4" />
               </div>
-              {isOpen && <span className="text-sm whitespace-nowrap">New Chat</span>}
+              {isOpen && (
+                <span className="text-sm tracking-wide whitespace-nowrap">
+                  New Chat
+                </span>
+              )}
             </Button>
 
             {/* Search Input Bar (only when expanded) */}
-            <div className={cn("relative transition-all duration-300", isOpen ? "opacity-100 h-10 mt-1" : "opacity-0 h-0 w-0 overflow-hidden mt-0")}>
+            <div
+              className={cn(
+                "relative transition-all duration-300",
+                isOpen
+                  ? "opacity-100 h-10 mt-1"
+                  : "opacity-0 h-0 w-0 overflow-hidden mt-0",
+              )}
+            >
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-muted-foreground/60" />
               </div>
@@ -151,14 +183,19 @@ export function ChatSidebar({
                 placeholder="Search chats..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-background border-border/50 pl-9 rounded-xl h-10 text-sm focus-visible:ring-1 focus-visible:ring-indigo-500/50"
+                className="w-full bg-black/5 dark:bg-black/30 border-none pl-9 rounded-2xl h-10 text-sm shadow-inner focus-visible:ring-1 focus-visible:ring-primary/50 text-foreground placeholder:text-muted-foreground/50 transition-colors"
               />
             </div>
           </div>
 
-          {/* Sessions List */}
-          <ScrollArea className="flex-1 px-3">
-            <div className={cn("pb-3 space-y-1 group/list", !isOpen && "flex flex-col items-center")}>
+          {/* Sessions List — scrollable area, takes remaining space */}
+          <ScrollArea className="flex-1 min-h-0 px-3">
+            <div
+              className={cn(
+                "pb-3 space-y-1 group/list",
+                !isOpen && "flex flex-col items-center",
+              )}
+            >
               {filteredSessions.length === 0 ? (
                 isOpen ? (
                   <div className="flex flex-col items-center justify-center p-8 text-center mt-4">
@@ -170,29 +207,35 @@ export function ChatSidebar({
                     </p>
                   </div>
                 ) : null
-
               ) : (
                 filteredSessions.map((session) => (
                   <div
                     key={session.id}
                     className={cn(
-                      "group relative rounded-xl transition-all duration-200 border border-transparent overflow-hidden",
+                      "group relative font-sans transition-all ease-in-out duration-300",
+                      isOpen ? "rounded-[12px]" : "rounded-[12px]",
                       currentSessionId === session.id
-                        ? "bg-[#33345c]/10 text-[#33345c] font-medium border-[#33345c]/20"
-                        : "bg-transparent text-muted-foreground hover:bg-[#33345c]/5 hover:text-[#33345c]",
-                      !isOpen && "w-11 h-11 mx-auto flex items-center justify-center shrink-0"
+                        ? "bg-black/5 dark:bg-[#FF5E00] dark:shadow-[0_4px_12px_rgba(255,94,0,0.3)] shadow-sm"
+                        : "bg-transparent hover:bg-black/5 dark:hover:bg-[#FF5E00]/10 transition-colors",
+                      !isOpen &&
+                        "w-11 h-11 mx-auto flex items-center justify-center shrink-0",
                     )}
                   >
+                    {/* Indicator Bar */}
+                    {currentSessionId === session.id && (
+                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-[18px] bg-foreground/60 dark:bg-white rounded-r-full dark:shadow-[0_0_8px_rgba(255,255,255,0.5)] z-10" />
+                    )}
+
                     {editingId === session.id && isOpen ? (
                       /* Inline Rename Mode */
-                      <div className="flex items-center gap-2 p-2 w-full">
+                      <div className="flex items-center gap-2 p-2 w-full relative z-10">
                         <Input
                           ref={editInputRef}
                           value={editTitle}
                           onChange={(e) => setEditTitle(e.target.value)}
                           onKeyDown={handleKeyDown}
                           onBlur={confirmRename}
-                          className="h-8 text-sm px-2 bg-background border-border flex-1 min-w-0 rounded-lg shadow-inner"
+                          className="h-8 text-sm px-2 bg-background border-border flex-1 min-w-0 rounded-lg shadow-inner focus-visible:ring-1 focus-visible:ring-[#FF5E00]"
                         />
                         <div className="flex items-center gap-1 shrink-0">
                           <button
@@ -211,29 +254,51 @@ export function ChatSidebar({
                       </div>
                     ) : (
                       /* Normal Display Mode */
-                      <div className={cn("grid w-full group/item", isOpen ? "grid-cols-[1fr_auto] items-center" : "grid-cols-1 place-items-center w-full h-full")}>
+                      <div
+                        className={cn(
+                          "grid w-full group/item relative z-10",
+                          isOpen
+                            ? "grid-cols-[1fr_auto] items-center"
+                            : "grid-cols-1 place-items-center w-full h-full",
+                        )}
+                      >
                         {/* Selection Area / Title */}
                         <button
                           className={cn(
-                            "flex items-center cursor-pointer min-w-0 text-left w-full h-full focus:outline-none focus:bg-accent/50 rounded-l-xl",
-                            isOpen ? "gap-3 px-3 py-2.5" : "justify-center p-0 rounded-xl"
+                            "flex items-center cursor-pointer min-w-0 text-left w-full h-full focus:outline-none focus:bg-white/5 transition-transform duration-300",
+                            isOpen ? "rounded-[12px]" : "rounded-[12px]",
+                            currentSessionId !== session.id &&
+                              "group-hover/item:translate-x-1",
+                            isOpen
+                              ? "gap-3 px-3 py-2.5"
+                              : "justify-center p-0",
                           )}
                           onClick={() => onSelectSession(session.id)}
                           title={session.title || "New Chat"}
                         >
                           <div
                             className={cn(
-                              "p-1.5 rounded-lg transition-colors shrink-0",
+                              "flex items-center justify-center transition-colors duration-300 shrink-0",
                               currentSessionId === session.id
-                                ? "bg-[#33345c] text-white"
-                                : "bg-muted/50 text-muted-foreground group-hover/item:bg-[#33345c]/10 group-hover/item:text-[#33345c]",
+                                ? "text-foreground dark:text-white"
+                                : "text-muted-foreground group-hover/item:text-foreground dark:group-hover/item:text-[#FF5E00] opacity-70 group-hover/item:opacity-100",
                             )}
                           >
-                            <MessageSquare className={cn("w-3.5 h-3.5", !isOpen && "w-4 h-4")} />
+                            <MessageSquare
+                              className={cn(
+                                "w-4 h-4",
+                                !isOpen && "w-5 h-5",
+                              )}
+                            />
                           </div>
                           {isOpen && (
                             <div
-                              className="truncate text-sm tracking-tight"
+                              className={cn(
+                                "truncate text-[14px] tracking-wide transition-colors duration-300",
+                                currentSessionId === session.id
+                                  ? "text-foreground dark:text-white font-medium"
+                                  : "text-muted-foreground group-hover/item:text-foreground"
+                              )}
                             >
                               {session.title || "New Chat"}
                             </div>
@@ -245,10 +310,14 @@ export function ChatSidebar({
                           <div className="pr-1 pl-1 flex items-center justify-end w-10 shrink-0 h-full">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                {/* Menggunakan button native untuk memastikan event trigger bekerja 100% */}
                                 <button
                                   type="button"
-                                  className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                                  className={cn(
+                                    "h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
+                                    currentSessionId === session.id
+                                      ? "text-foreground/70 hover:text-foreground hover:bg-black/10 dark:text-white/80 dark:hover:text-white dark:hover:bg-white/20"
+                                      : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                                  )}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                   }}
@@ -296,91 +365,114 @@ export function ChatSidebar({
             </div>
           </ScrollArea>
 
-          {/* User Profile & Settings Area (Dropdown Menu) */}
-          <div className="p-2 shrink-0 mt-auto">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  onClick={(e) => e.stopPropagation()}
-                  className={cn(
-                    "flex items-center transition-colors font-normal outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 overflow-hidden",
-                    isOpen 
-                      ? "w-full gap-3 justify-start px-2 py-2.5 rounded-xl hover:bg-muted/60" 
-                      : "w-11 h-11 justify-center rounded-xl mx-auto hover:bg-muted/60"
-                  )}
-                >
-                  <div className="w-8 h-8 bg-[#d83545] text-white rounded-full flex items-center justify-center shrink-0 text-xs font-semibold shadow-sm">
-                    {userName ? userName.substring(0, 2).toUpperCase() : "LE"}
-                  </div>
-                  {isOpen && (
-                    <div className="flex flex-col items-start min-w-0 flex-1">
-                      <span className="text-[13px] font-semibold text-foreground truncate w-full text-left">{userName || "LeonPradagon"}</span>
-                      <span className="text-[11px] text-muted-foreground text-left truncate w-full">{isAdmin ? "Super Admin" : "Analyst"}</span>
-                    </div>
-                  )}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuPortal>
-                <DropdownMenuContent 
-                   align="start" 
-                   side="top" 
-                   sideOffset={8}
-                   className="w-[280px] p-2 rounded-2xl border shadow-xl z-[99999]" 
-                >
-                  <div className="flex items-center gap-3 px-2 py-3 mb-1">
-                    <div className="w-8 h-8 bg-[#d83545] text-white rounded-full flex items-center justify-center shrink-0 text-xs font-semibold">
+          {/* Bottom Section — pinned to bottom */}
+          <div className="shrink-0 border-t border-border/10">
+            {/* User Profile & Settings Area (Dropdown Menu) */}
+            <div className="p-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={(e) => e.stopPropagation()}
+                    className={cn(
+                      "flex items-center transition-colors font-normal outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 overflow-hidden",
+                      isOpen
+                        ? "w-full gap-3 justify-start px-2 py-2.5 rounded-2xl hover:bg-[var(--surface-variant)]"
+                        : "w-11 h-11 justify-center rounded-2xl mx-auto hover:bg-[var(--surface-variant)]",
+                    )}
+                  >
+                    <div className="w-8 h-8 bg-[#d83545] text-white rounded-full flex items-center justify-center shrink-0 text-xs font-semibold shadow-sm">
                       {userName ? userName.substring(0, 2).toUpperCase() : "LE"}
                     </div>
-                    <div className="flex flex-col items-start min-w-0">
-                       <p className="text-[13px] font-semibold truncate w-full leading-tight">{userName || "LeonPradagon"}</p>
-                       <p className="text-[11px] text-muted-foreground w-full mt-0.5">{isAdmin ? "Super Admin" : "Analyst"}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="h-px bg-border my-1 mx-2" />
-                  
-                  <DropdownMenuItem className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
-                    <Zap className="w-4 h-4 text-muted-foreground" /> Personalization
-                  </DropdownMenuItem>
-                  
-                  <DropdownMenuItem className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
-                    <div className="w-4 h-4 bg-[#d83545] text-white rounded-full flex items-center justify-center text-[7px] font-bold">
-                       {userName ? userName.substring(0, 2).toUpperCase() : "LE"}
-                    </div>
-                    Profile
-                  </DropdownMenuItem>
-                  
-                  <DropdownMenuItem
-                    disabled={!isAdmin}
-                    onSelect={() => {
-                      if (onOpenSettings) onOpenSettings();
-                    }}
-                    className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors"
+                    {isOpen && (
+                      <div className="flex flex-col items-start min-w-0 flex-1">
+                        <span className="text-[13px] font-semibold text-foreground truncate w-full text-left">
+                          {userName || "LeonPradagon"}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground text-left truncate w-full">
+                          {isAdmin ? "Super Admin" : "Analyst"}
+                        </span>
+                      </div>
+                    )}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuContent
+                    align="start"
+                    side="top"
+                    sideOffset={8}
+                    className="w-[280px] p-2 rounded-2xl border shadow-xl z-[99999]"
                   >
-                    <Settings className="w-4 h-4 text-muted-foreground" /> {isAdmin ? "Admin Settings" : "Settings"}
-                  </DropdownMenuItem>
-                  
-                  <div className="h-px bg-border my-1 mx-2" />
-                  
-                  <DropdownMenuItem className="flex justify-between items-center cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
-                    <div className="flex items-center gap-3">
-                      <HelpCircle className="w-4 h-4 text-muted-foreground" /> Help
+                    <div className="flex items-center gap-3 px-2 py-3 mb-1">
+                      <div className="w-8 h-8 bg-[#d83545] text-white rounded-full flex items-center justify-center shrink-0 text-xs font-semibold">
+                        {userName ? userName.substring(0, 2).toUpperCase() : "LE"}
+                      </div>
+                      <div className="flex flex-col items-start min-w-0">
+                        <p className="text-[13px] font-semibold truncate w-full leading-tight">
+                          {userName || "LeonPradagon"}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground w-full mt-0.5">
+                          {isAdmin ? "Super Admin" : "Analyst"}
+                        </p>
+                      </div>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                  </DropdownMenuItem>
-                  
-                  <DropdownMenuItem
-                    onSelect={() => {
+
+                    <div className="h-px bg-border my-1 mx-2" />
+
+                    <DropdownMenuItem className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
+                      <Zap className="w-4 h-4 text-muted-foreground" />{" "}
+                      Personalization
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
+                      <div className="w-4 h-4 bg-[#d83545] text-white rounded-full flex items-center justify-center text-[7px] font-bold">
+                        {userName ? userName.substring(0, 2).toUpperCase() : "LE"}
+                      </div>
+                      Profile
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        if (onOpenEmailSettings) onOpenEmailSettings();
+                      }}
+                      className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors"
+                    >
+                      <Mail className="w-4 h-4 text-muted-foreground" /> Email
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      disabled={!isAdmin}
+                      onSelect={() => {
+                        window.location.href = '/admin/users';
+                      }}
+                      className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors text-indigo-500/80 hover:text-indigo-500"
+                    >
+                      <Shield className="w-4 h-4" />{" "}
+                      {isAdmin ? "Admin Dashboard" : "Admin Settings"}
+                    </DropdownMenuItem>
+
+                    <div className="h-px bg-border my-1 mx-2" />
+
+                    <DropdownMenuItem className="flex justify-between items-center cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
+                      <div className="flex items-center gap-3">
+                        <HelpCircle className="w-4 h-4 text-muted-foreground" />{" "}
+                        Help
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onSelect={() => {
                         if (handleLogout) handleLogout();
-                    }}
-                    className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors mt-0.5"
-                  >
-                    <LogOut className="w-4 h-4 text-muted-foreground" /> Log out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenuPortal>
-            </DropdownMenu>
+                      }}
+                      className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors mt-0.5"
+                    >
+                      <LogOut className="w-4 h-4 text-muted-foreground" /> Log out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenuPortal>
+              </DropdownMenu>
+            </div>
           </div>
         </div>
 
@@ -388,7 +480,7 @@ export function ChatSidebar({
         <div className="hidden lg:block absolute top-1/2 right-[-14px] -translate-y-1/2 transition-all duration-300 ease-in-out z-50">
           <button
             onClick={onToggle}
-            className="flex h-12 w-3.5 items-center justify-center rounded-r-md border border-l-0 border-border bg-card text-muted-foreground hover:text-foreground shadow-sm transition-colors cursor-pointer group/toggle focus:outline-none"
+            className="flex h-12 w-3.5 items-center justify-center rounded-r-2xl bg-[var(--surface-container-lowest)] text-muted-foreground hover:text-foreground shadow-[12px_0_20px_rgba(45,52,51,0.03)] transition-colors cursor-pointer group/toggle focus:outline-none"
             title={isOpen ? "Tutup Sidebar" : "Buka Sidebar"}
           >
             <div className="w-1 h-3 rounded-full bg-muted-foreground/30 transition-colors group-hover/toggle:bg-muted-foreground" />

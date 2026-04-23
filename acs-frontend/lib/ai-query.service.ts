@@ -149,6 +149,14 @@ export const streamChatRequest = async (
               case "step":
                 onStep?.(data.step);
                 break;
+              case "file_export":
+                // Safely emit to a new callback
+                options.onAttachment?.({
+                  format: data.format,
+                  filename: data.filename,
+                  payload: data.payload
+                });
+                break;
               case "done":
                 onDone?.(data.model);
                 break;
@@ -188,12 +196,13 @@ export const processQuery = async (
     return new Promise<ChatMessage>((resolve, reject) => {
       let fullContent = "";
       let sources: any[] = [];
+      let attachments: any[] = [];
       let modelUsed = "openai/gpt-oss-120b";
 
       streamChatRequest(
         userQuery,
         chatHistory,
-        { sessionId, files, model },
+        { sessionId, files, model, onAttachment: (att: any) => attachments.push(att) },
         (token) => {
           fullContent += token;
           onStreamToken(token);
@@ -212,6 +221,7 @@ export const processQuery = async (
             role: "assistant",
             timestamp: new Date(),
             sources,
+            attachments,
             modelUsed,
             processingTime: Date.now() - startTime,
           });

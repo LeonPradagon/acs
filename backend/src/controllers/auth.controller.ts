@@ -3,6 +3,16 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../config/db";
 import { env } from "../common/env";
+import { AuthRequest } from "../middleware/auth.middleware";
+
+// A7: Cookie options for refresh token (httpOnly for XSS protection)
+const REFRESH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/api/auth",
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+};
 
 export const register = async (req: Request, res: Response) => {
   const { email, password, name } = req.body;
@@ -23,16 +33,19 @@ export const register = async (req: Request, res: Response) => {
     });
 
     const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role, type: "access" },
+      { userId: user.id, email: user.email, role: user.role, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel, type: "access" },
       env.JWT_SECRET,
       { expiresIn: "1h" },
     );
 
     const refreshToken = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role, type: "refresh" },
+      { userId: user.id, email: user.email, role: user.role, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel, type: "refresh" },
       env.JWT_REFRESH_SECRET,
       { expiresIn: "7d" },
     );
+
+    // A7: Set refresh token as httpOnly cookie
+    res.cookie("refreshToken", refreshToken, REFRESH_COOKIE_OPTIONS);
 
     res.status(201).json({
       message: "User registered successfully",
@@ -41,7 +54,7 @@ export const register = async (req: Request, res: Response) => {
         accessToken,
         refreshToken,
       },
-      user: { id: user.id, email: user.email, name: user.name },
+      user: { id: user.id, email: user.email, name: user.name, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel },
     });
   } catch (error: any) {
     console.error("[Auth Register Error]:", error);
@@ -73,16 +86,19 @@ export const login = async (req: Request, res: Response) => {
     }
 
     const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role, type: "access" },
+      { userId: user.id, email: user.email, role: user.role, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel, type: "access" },
       env.JWT_SECRET,
       { expiresIn: "1h" },
     );
 
     const refreshToken = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role, type: "refresh" },
+      { userId: user.id, email: user.email, role: user.role, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel, type: "refresh" },
       env.JWT_REFRESH_SECRET,
       { expiresIn: "7d" },
     );
+
+    // A7: Set refresh token as httpOnly cookie
+    res.cookie("refreshToken", refreshToken, REFRESH_COOKIE_OPTIONS);
 
     res.status(200).json({
       success: true,
@@ -94,6 +110,8 @@ export const login = async (req: Request, res: Response) => {
           email: user.email,
           name: user.name,
           role: user.role,
+          divisionId: user.divisionId,
+          clearanceLevel: user.clearanceLevel,
         },
         tokens: {
           accessToken: accessToken,
@@ -110,8 +128,12 @@ export const login = async (req: Request, res: Response) => {
   }
 };
 
-export const verifyToken = async (req: any, res: Response) => {
+export const verifyToken = async (req: AuthRequest, res: Response) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Authentication required" });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
     });
@@ -139,6 +161,8 @@ export const verifyToken = async (req: any, res: Response) => {
           id: user.id,
           email: user.email,
           name: user.name,
+          divisionId: user.divisionId,
+          clearanceLevel: user.clearanceLevel,
         },
       },
     });
@@ -150,7 +174,8 @@ export const verifyToken = async (req: any, res: Response) => {
 };
 
 export const refreshToken = async (req: Request, res: Response) => {
-  const { refreshToken: incomingToken } = req.body;
+  // A7: Try cookie first, then body (backward compatible)
+  const incomingToken = req.cookies?.refreshToken || req.body?.refreshToken;
   if (!incomingToken)
     return res.status(400).json({ success: false, message: "Token required" });
 
@@ -171,10 +196,13 @@ export const refreshToken = async (req: Request, res: Response) => {
         .json({ success: false, message: "User not found" });
 
     const newAccessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role, type: "access" },
+      { userId: user.id, email: user.email, role: user.role, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel, type: "access" },
       env.JWT_SECRET,
       { expiresIn: "1h" },
     );
+
+    // A7: Update cookie with potentially rotated refresh
+    res.cookie("refreshToken", incomingToken, REFRESH_COOKIE_OPTIONS);
 
     res.status(200).json({
       success: true,
@@ -185,6 +213,8 @@ export const refreshToken = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    // A7: Clear invalid cookie
+    res.clearCookie("refreshToken", { path: "/api/auth" });
     res.status(401).json({ success: false, message: "Invalid refresh token" });
   }
 };

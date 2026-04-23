@@ -64,15 +64,19 @@ export const deleteSession = asyncHandler(async (req, res) => {
 });
 
 /**
- * Load chat history for a session (with ownership check).
+ * Load chat history for a session (with ownership check + pagination).
  */
 export const getChatHistory = asyncHandler(async (req, res) => {
   const { sessionId } = req.params;
-  const history = await SessionService.getChatHistory(
+  const cursor = req.query.cursor as string | undefined;
+  const limit = parseInt(req.query.limit as string) || 50;
+  
+  const result = await SessionService.getChatHistory(
     sessionId,
     req.user?.userId,
+    { cursor, limit },
   );
-  res.status(200).json({ success: true, data: history });
+  res.status(200).json({ success: true, data: result.messages, pagination: result.pagination });
 });
 
 /**

@@ -20,6 +20,29 @@ export const uploadDocuments = async (req: Request, res: Response) => {
       }
     }
 
+    const currentUser = (req as any).user;
+    let explicitDivisionId = metadata.divisionId !== undefined ? metadata.divisionId : currentUser?.divisionId || null;
+    let explicitClearanceLevel = metadata.clearanceLevel !== undefined ? metadata.clearanceLevel : 1;
+
+    // Normal users cannot override to other divisions or set high clearances
+    if (currentUser?.role !== "admin" && currentUser?.role !== "superadmin") {
+       explicitDivisionId = currentUser?.divisionId || null;
+       explicitClearanceLevel = 1; // standard documents created by users get level 1
+    }
+
+    // Resolve string name to Division UUID if valid string
+    if (explicitDivisionId && explicitDivisionId.length < 36) {
+        let div = await prisma.division.findFirst({
+            where: { name: { equals: explicitDivisionId, mode: "insensitive" } }
+        });
+        if (!div) {
+            div = await prisma.division.create({
+                data: { name: explicitDivisionId.toUpperCase() }
+            });
+        }
+        explicitDivisionId = div.id;
+    }
+
     if (!files || files.length === 0) {
       return res.status(400).json({
         success: false,
@@ -38,6 +61,9 @@ export const uploadDocuments = async (req: Request, res: Response) => {
           classification: metadata.classification || "Unclassified",
           tags: Array.isArray(metadata.tags) ? metadata.tags : [],
           status: "PENDING",
+          userId: currentUser?.userId || null,
+          divisionId: explicitDivisionId,
+          clearanceLevel: explicitClearanceLevel,
           metadata: {
             filename: file.filename,
             mimetype: file.mimetype,
