@@ -7,6 +7,9 @@ export interface RagContext {
   score?: number;
 }
 
+// Minimum relevance score — results below this are filtered out
+const MIN_RELEVANCE_SCORE = 0.25;
+
 // Indonesian stopwords to filter out from search queries
 const STOPWORDS = new Set([
   "yang",
@@ -382,5 +385,8 @@ export const retrieveContext = async (query: string, userId?: string, divisionId
     });
   }
 
-  return contexts.slice(0, 15);
+  // Filter out low-relevance results
+  const filtered = contexts.filter((c) => (c.score || 0) >= MIN_RELEVANCE_SCORE);
+
+  return filtered.slice(0, 15);
 };

@@ -49,7 +49,7 @@ export function buildConversationHistory(
   messages: any[],
   limit: number = MAX_HISTORY_MESSAGES,
 ): any[] {
-  return messages
+  let history = messages
     .filter((m: any) => ["system", "user", "assistant", "tool"].includes(m.role))
     .slice(-limit)
     .map((m: any) => {
@@ -64,6 +64,19 @@ export function buildConversationHistory(
       if (m.name) result.name = m.name;
       return result;
     });
+
+  // Smart Trimming based on character length / estimated tokens
+  // 12,000 tokens = ~48,000 characters (roughly 4 chars per token)
+  const MAX_ALLOWED_CHAR_LENGTH = 48000;
+  
+  const getCharCount = (hist: any[]) => 
+    hist.reduce((acc, m) => acc + (typeof m.content === "string" ? m.content.length : JSON.stringify(m.content || "").length), 0);
+
+  while (history.length > 2 && getCharCount(history) > MAX_ALLOWED_CHAR_LENGTH) {
+    history.shift();
+  }
+
+  return history;
 }
 
 // ============================================================

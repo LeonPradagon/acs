@@ -22,13 +22,14 @@ import {
   Moon,
   Database,
   Shield,
+  RefreshCw,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button"; // Hanya dipakai untuk tombol utama, bukan trigger dropdown
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { ChatSessionItem } from "@/lib/ai-query.service";
+import { ChatSessionItem, aiQueryService } from "@/lib/ai-query.service";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,12 +74,59 @@ export function ChatSidebar({
   const [searchQuery, setSearchQuery] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
 
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Search debounce and API fetch
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const delayDebounceFn = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const results = await aiQueryService.searchChatHistory(searchQuery);
+        setSearchResults(results);
+      } catch (err) {
+        console.error("Search failed:", err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
+
+  const highlightText = (text: string, highlight: string) => {
+    if (!highlight.trim()) {
+      return <span>{text}</span>;
+    }
+    const regex = new RegExp(`(${highlight.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, "gi");
+    const parts = text.split(regex);
+    return (
+      <span>
+        {parts.map((part, i) =>
+          regex.test(part) ? (
+            <mark key={i} className="bg-amber-200 dark:bg-amber-800 text-foreground rounded px-0.5 font-semibold">
+              {part}
+            </mark>
+          ) : (
+            part
+          )
+        )}
+      </span>
+    );
+  };
 
   const filteredSessions = sessions.filter((session) =>
     (session.title || "New Chat")
@@ -196,7 +244,49 @@ export function ChatSidebar({
                 !isOpen && "flex flex-col items-center",
               )}
             >
-              {filteredSessions.length === 0 ? (
+              {searchQuery.trim().length >= 2 ? (
+                isSearching ? (
+                  <div className="flex flex-col items-center justify-center p-8 text-center mt-4 w-full">
+                    <RefreshCw className="w-6 h-6 text-primary animate-spin mb-3" />
+                    <p className="text-xs text-muted-foreground">Searching history...</p>
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center p-8 text-center mt-4 w-full">
+                    <div className="w-12 h-12 rounded-2xl bg-muted/50 flex items-center justify-center mb-3">
+                      <Search className="w-6 h-6 text-muted-foreground/30" />
+                    </div>
+                    <p className="text-sm font-medium text-muted-foreground/60">Tidak ditemukan</p>
+                  </div>
+                ) : (
+                  searchResults.map((res) => (
+                    <button
+                      key={res.id}
+                      onClick={() => {
+                        onSelectSession(res.sessionId);
+                        setSearchQuery("");
+                      }}
+                      className={cn(
+                        "w-full text-left p-3 rounded-2xl border bg-gradient-to-br transition-all duration-300 hover:scale-[1.01] hover:shadow focus:outline-none mb-2 border-border/50",
+                        currentSessionId === res.sessionId
+                          ? "from-primary/10 to-transparent border-primary/20"
+                          : "from-muted/50 to-muted/20 hover:from-muted/80"
+                      )}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-bold text-foreground/80 truncate max-w-[150px]">
+                          {res.session?.title || "New Chat"}
+                        </span>
+                        <span className="text-[9px] text-muted-foreground/60 font-mono">
+                          {new Date(res.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground/80 leading-relaxed line-clamp-2 italic">
+                        &quot;{highlightText(res.content, searchQuery)}&quot;
+                      </p>
+                    </button>
+                  ))
+                )
+              ) : filteredSessions.length === 0 ? (
                 isOpen ? (
                   <div className="flex flex-col items-center justify-center p-8 text-center mt-4">
                     <div className="w-12 h-12 rounded-2xl bg-muted/50 flex items-center justify-center mb-3">

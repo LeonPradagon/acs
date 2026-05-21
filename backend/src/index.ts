@@ -45,14 +45,14 @@ app.use(
         return callback(null, true);
       }
 
-      // Allow all localhost (development)
-      if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
+      // Allow localhost only in development
+      if (env.NODE_ENV !== "production" && (origin.includes("localhost") || origin.includes("127.0.0.1"))) {
         return callback(null, true);
       }
 
-      // Fallback: allow everything (open mode)
-      // Remove this block if you want to strictly block unknown origins
-      return callback(null, true);
+      // Strict mode: block all unknown origins
+      console.warn(`[CORS] Blocked request from unknown origin: ${origin}`);
+      return callback(new Error(`CORS policy: Origin ${origin} is not allowed`), false);
     },
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: [

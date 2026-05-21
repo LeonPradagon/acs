@@ -21,7 +21,7 @@ export const useRAG = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
 
   const [uploadMetadata, setUploadMetadata] = useState<UploadMetadata>({
-    category: "cybersecurity",
+    category: "general",
     classification: "Internal",
     tags: [],
   });
@@ -42,15 +42,21 @@ export const useRAG = () => {
         const isValidType =
           file.type === "application/pdf" ||
           file.type === "text/plain" ||
+          file.type === "text/csv" ||
+          file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+          file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
           file.name.endsWith(".txt") ||
-          file.name.endsWith(".pdf");
+          file.name.endsWith(".pdf") ||
+          file.name.endsWith(".docx") ||
+          file.name.endsWith(".xlsx") ||
+          file.name.endsWith(".csv");
         const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB limit
         return isValidType && isValidSize;
       });
 
       if (files.length > validFiles.length) {
         setUploadError(
-          "Beberapa file tidak valid (hanya PDF/TXT dan maksimal 10MB)",
+          "Beberapa file tidak valid (hanya PDF/TXT/DOCX/XLSX/CSV dan maksimal 10MB)",
         );
       } else {
         setUploadError("");
@@ -142,7 +148,7 @@ export const useRAG = () => {
           setShowUploadModal(false);
           setUploadedFiles([]);
           setUploadMetadata({
-            category: "cybersecurity",
+            category: "general",
             classification: "Internal",
             tags: [],
           });

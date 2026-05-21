@@ -12,6 +12,7 @@ import {
   getSystemSettings,
   updateSystemSetting,
   testConnection,
+  getAiBrainStatus,
 } from "../controllers/admin.controller";
 import {
   updateUserRoleSchema,
@@ -40,5 +41,8 @@ router.delete("/documents/:id", deleteDocument);
 router.get("/settings", getSystemSettings);
 router.put("/settings", validate(updateSettingSchema), updateSystemSetting);
 router.post("/settings/test-connection", validate(testConnectionSchema), testConnection);
+
+// AI Brain Status
+router.get("/ai-brain-status", getAiBrainStatus);
 
 export default router;

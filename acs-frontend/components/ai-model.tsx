@@ -58,7 +58,36 @@ import { ChatMessage } from "@/types/chat";
 // Welcome Screen Component
 // ============================================================
 
-const SUGGESTED_PROMPTS: any[] = [];
+const SUGGESTED_PROMPTS: any[] = [
+  {
+    icon: Sparkles,
+    title: "Kebijakan DDoS",
+    desc: "Bagaimana cara melakukan mitigasi serangan siber DDoS?",
+    prompt: "Bagaimana cara melakukan mitigasi serangan siber DDoS?",
+    color: "from-blue-500/5 to-indigo-500/5 border-blue-500/10 hover:border-blue-500/30 text-blue-500"
+  },
+  {
+    icon: Brain,
+    title: "Karyawan IT",
+    desc: "Berapa total karyawan di divisi IT saat ini?",
+    prompt: "Berapa total karyawan di divisi IT saat ini?",
+    color: "from-purple-500/5 to-pink-500/5 border-purple-500/10 hover:border-purple-500/30 text-purple-500"
+  },
+  {
+    icon: Code,
+    title: "Gaji HRD",
+    desc: "Tampilkan data gaji karyawan di divisi HRD",
+    prompt: "Tampilkan data gaji karyawan di divisi HRD",
+    color: "from-emerald-500/5 to-teal-500/5 border-emerald-500/10 hover:border-emerald-500/30 text-emerald-500"
+  },
+  {
+    icon: FileText,
+    title: "Ringkasan Kebijakan",
+    desc: "Ringkas dokumen kebijakan keamanan yang baru diunggah",
+    prompt: "Ringkas dokumen kebijakan keamanan yang baru diunggah",
+    color: "from-orange-500/5 to-amber-500/5 border-orange-500/10 hover:border-orange-500/30 text-orange-500"
+  }
+];
 
 function WelcomeScreen({
   onPromptClick,
@@ -101,6 +130,35 @@ function WelcomeScreen({
           <br />
           Apa yang bisa saya bantu hari ini?
         </h2>
+      </div>
+
+      {/* Suggested Prompts Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full mb-8">
+        {SUGGESTED_PROMPTS.map((item, idx) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={idx}
+              onClick={() => onPromptClick(item.prompt)}
+              className={cn(
+                "flex flex-col items-start text-left p-4 rounded-2xl border bg-gradient-to-br transition-all duration-300 hover:scale-[1.02] hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/20",
+                item.color || "from-muted/50 to-muted border-border/50"
+              )}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <div className="p-1.5 rounded-xl bg-white/50 dark:bg-black/30 backdrop-blur-sm border border-black/5 dark:border-white/5">
+                  <Icon className="w-4 h-4 text-inherit" />
+                </div>
+                <span className="text-xs font-bold tracking-wide uppercase text-foreground/80">
+                  {item.title}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+                {item.desc}
+              </p>
+            </button>
+          );
+        })}
       </div>
 
       {/* Minimal Footer */}
@@ -159,6 +217,30 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
       chat.setQuery(newQuery);
     },
   }));
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Shift+N -> New Session
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        chat.handleNewSession();
+      }
+      // Ctrl+Shift+S -> Toggle Sidebar
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        chat.setIsSidebarOpen(!chat.isSidebarOpen);
+      }
+      // Escape -> Stop Generation
+      if (e.key === "Escape" && chat.isProcessing) {
+        e.preventDefault();
+        chat.stopGeneration();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [chat.isProcessing, chat.isSidebarOpen]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

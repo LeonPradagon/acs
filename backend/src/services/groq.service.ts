@@ -1,13 +1,15 @@
-import Groq from "groq-sdk";
 import { RagContext } from "./rag.service";
 import { env } from "../common/env";
-import { withRetry } from "../common/retry";
 import { ErpService } from "./erp.service";
 import { prisma } from "../config/db";
 
-const groq = new Groq({
-  apiKey: env.GROQ_API_KEY,
-});
+import { ChatGroq } from "@langchain/groq";
+import { SystemMessage, HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
+import { DynamicStructuredTool } from "@langchain/core/tools";
+import { z } from "zod";
+
+// Safety: max number of tool call rounds to prevent infinite loops
+const MAX_TOOL_DEPTH = 3;
 
 interface ChatMessageInput {
   role: "system" | "user" | "assistant" | "tool";
@@ -95,14 +97,72 @@ async function getCurrentErpMode(): Promise<string> {
 }
 
 /**
- * Check if an error is retryable (network/server errors, not auth errors)
+ * Generate LangChain tools for ERP based on current mode
  */
-function isRetryableError(error: any): boolean {
-  if (error?.name === "AbortError") return false;
-  if (error?.status === 429) return true; // Rate limit → retryable
-  if (error?.status && error.status >= 400 && error.status < 500) return false;
-  return true;
-}
+const getTools = (erpMode: string, currentUserDivision: string | null) => {
+  const tools = [];
+  
+  if (erpMode === "DB") {
+    tools.push(new DynamicStructuredTool({
+      name: "query_erp_sql",
+      description: "Execute a READ-ONLY PostgreSQL query against the Mock ERP Database to retrieve accurate structured data.",
+      schema: z.object({
+        sql_query: z.string().describe("The PostgreSQL SELECT query to execute."),
+      }),
+      func: async ({ sql_query }) => {
+        try {
+          const result = await ErpService.executeReadOnlySQL(sql_query);
+          return JSON.stringify(result, (key, value) => typeof value === 'bigint' ? value.toString() : value);
+        } catch (err: any) {
+          return JSON.stringify({ error: err.message });
+        }
+      },
+    }));
+  } else {
+    tools.push(new DynamicStructuredTool({
+      name: "query_erp_api",
+      description: "Execute a REST API call against the Mock ERP to retrieve structured data.",
+      schema: z.object({
+        endpoint: z.string().describe("The API endpoint path (e.g. /api/v1/employees)."),
+        queryParams: z.string().optional().describe("The query parameters represented as a stringified JSON."),
+      }),
+      func: async ({ endpoint, queryParams }) => {
+        try {
+          const result = await ErpService.executeMockApi(endpoint, queryParams || "{}", currentUserDivision);
+          return JSON.stringify(result, (key, value) => typeof value === 'bigint' ? value.toString() : value);
+        } catch (err: any) {
+          return JSON.stringify({ error: err.message });
+        }
+      },
+    }));
+  }
+  return tools;
+};
+
+/**
+ * Convert standard chat messages to LangChain BaseMessage format
+ */
+const convertMessages = (messages: ChatMessageInput[]) => {
+  const lcMessages = [];
+  for (const m of messages) {
+    if (m.role === "system") {
+      lcMessages.push(new SystemMessage(m.content as string));
+    } else if (m.role === "user") {
+      lcMessages.push(new HumanMessage(m.content as string));
+    } else if (m.role === "assistant") {
+      lcMessages.push(new AIMessage({
+        content: m.content as string,
+        tool_calls: m.tool_calls as any,
+      }));
+    } else if (m.role === "tool") {
+      lcMessages.push(new ToolMessage({
+        tool_call_id: m.tool_call_id || "",
+        content: m.content as string,
+      }));
+    }
+  }
+  return lcMessages;
+};
 
 /**
  * Non-streaming universal response with conversation memory
@@ -115,101 +175,54 @@ export const getUniversalResponse = async (
   currentUserDivision: string | null = null
 ): Promise<any> => {
   const erpMode = await getCurrentErpMode();
-
   const systemPrompt = buildSystemPrompt(context, currentUserDivision, erpMode);
+  const tools = getTools(erpMode, currentUserDivision);
+  
+  const lcHistory = convertMessages(conversationHistory);
+  lcHistory.unshift(new SystemMessage(systemPrompt));
+  lcHistory.push(new HumanMessage(query));
 
-  const messages: any[] = [
-    { role: "system", content: systemPrompt },
-    ...conversationHistory.map((m) => {
-      if (m.role === "system") return { role: "system", content: m.content as string };
-      if (m.role === "user") return { role: "user", content: m.content as any };
-      if (m.role === "tool") return { role: "tool", tool_call_id: m.tool_call_id, name: m.name, content: m.content as string };
-      return {
-        role: "assistant",
-        content: m.content as string,
-        ...(m.tool_calls ? { tool_calls: m.tool_calls } : {})
-      };
-    }),
-    { role: "user", content: query as any },
-  ];
+  const llm = new ChatGroq({
+    apiKey: env.GROQ_API_KEY,
+    model: model || "openai/gpt-oss-120b",
+    temperature: 0.3,
+    maxTokens: 4096,
+    maxRetries: 3
+  });
 
-  const chatCompletion = await withRetry(
-    () =>
-      groq.chat.completions.create({
-        messages,
-        model: model || "openai/gpt-oss-120b",
-        temperature: 0.3,
-        max_tokens: 4096,
-        top_p: 0.9,
-        tools: (erpMode === "DB" ? erpTools : erpApiTools) as any,
-      }),
-    {
-      maxRetries: 3,
-      baseDelayMs: 1000,
-      shouldRetry: (err) => isRetryableError(err),
-    },
-  );
-
-  // Check for tool calls
-  const message = chatCompletion.choices[0]?.message;
-  if (message?.tool_calls && message.tool_calls.length > 0) {
-    const tc = message.tool_calls[0];
-    if (tc.function?.name === "query_erp_sql" || tc.function?.name === "query_erp_api") {
-      let dataOut;
-      let queryArgs;
-      try {
-        queryArgs = JSON.parse(tc.function?.arguments || "{}");
-        if (tc.function?.name === "query_erp_sql") {
-           dataOut = await ErpService.executeReadOnlySQL(queryArgs.sql_query);
-        } else {
-           dataOut = await ErpService.executeMockApi(queryArgs.endpoint, queryArgs.queryParams, currentUserDivision);
-        }
-      } catch (err: any) {
-        dataOut = { error: err.message };
-      }
-
-      messages.push(message);
-      messages.push({
-        role: "tool",
-        tool_call_id: tc.id,
-        name: tc.function?.name,
-        content: JSON.stringify(dataOut, (key, value) => 
-          typeof value === 'bigint' ? value.toString() : value
-        ),
-      });
-
-      // Follow up call
-      const followup = await withRetry(
-        () =>
-          groq.chat.completions.create({
-            messages,
-            model: model || "openai/gpt-oss-120b",
-            temperature: 0.3,
-            max_tokens: 4096,
-            top_p: 0.9,
-          }),
-        {
-          maxRetries: 3,
-          baseDelayMs: 1000,
-          shouldRetry: (err) => isRetryableError(err),
-        },
-      );
-      
-      const followupContent = followup.choices[0]?.message?.content || "";
-      return { isJson: false, data: followupContent };
+  const llmWithTools = llm.bindTools(tools);
+  
+  let depth = 0;
+  let finalMessage: AIMessage | null = null;
+  
+  while (depth < MAX_TOOL_DEPTH) {
+    const response = await llmWithTools.invoke(lcHistory) as AIMessage;
+    lcHistory.push(response);
+    finalMessage = response;
+    
+    if (!response.tool_calls || response.tool_calls.length === 0) {
+      break;
     }
+    
+    for (const toolCall of response.tool_calls) {
+      const tool = tools.find(t => t.name === toolCall.name);
+      if (tool) {
+        const result = await (tool as any).invoke(toolCall.args);
+        lcHistory.push(new ToolMessage({
+          tool_call_id: toolCall.id || "",
+          content: result
+        }));
+      }
+    }
+    depth++;
   }
 
-  const outputContent = chatCompletion.choices[0]?.message?.content || "";
-  const output =
-    typeof outputContent === "string"
-      ? outputContent
-      : JSON.stringify(outputContent);
-
+  const outputContent = finalMessage?.content?.toString() || "";
+  
   // Parse if JSON format was returned
-  if (output.includes("```json")) {
+  if (outputContent.includes("```json")) {
     try {
-      const jsonMatch = output.match(/```json\n([\s\S]*?)\n```/);
+      const jsonMatch = outputContent.match(/```json\n([\s\S]*?)\n```/);
       if (jsonMatch && jsonMatch[1]) {
         const parsed = JSON.parse(jsonMatch[1]);
         return { isJson: true, data: parsed };
@@ -219,52 +232,8 @@ export const getUniversalResponse = async (
     }
   }
 
-  return { isJson: false, data: output };
+  return { isJson: false, data: outputContent };
 };
-
-const erpTools = [
-  {
-    type: "function",
-    function: {
-      name: "query_erp_sql",
-      description: "Execute a READ-ONLY PostgreSQL query against the Mock ERP Database to retrieve accurate structured data.",
-      parameters: {
-        type: "object",
-        properties: {
-          sql_query: {
-            type: "string",
-            description: "The PostgreSQL SELECT query to execute.",
-          },
-        },
-        required: ["sql_query"],
-      },
-    },
-  },
-];
-
-const erpApiTools = [
-  {
-    type: "function",
-    function: {
-      name: "query_erp_api",
-      description: "Execute a REST API call against the Mock ERP to retrieve structured data.",
-      parameters: {
-        type: "object",
-        properties: {
-          endpoint: {
-            type: "string",
-            description: "The API endpoint path (e.g. /api/v1/employees).",
-          },
-          queryParams: {
-            type: "string",
-            description: "The query parameters represented as a stringified JSON.",
-          },
-        },
-        required: ["endpoint"],
-      },
-    },
-  },
-];
 
 /**
  * Streaming response with conversation memory (SSE)
@@ -280,139 +249,92 @@ export const getStreamingResponse = async (
   abortSignal?: AbortSignal,
 ): Promise<void> => {
   const erpMode = await getCurrentErpMode();
-
   const systemPrompt = buildSystemPrompt(context, currentUserDivision, erpMode);
+  const tools = getTools(erpMode, currentUserDivision);
+  
+  const lcHistory = convertMessages(conversationHistory);
+  lcHistory.unshift(new SystemMessage(systemPrompt));
+  lcHistory.push(new HumanMessage(query));
 
-  const messages: any[] = [
-    { role: "system", content: systemPrompt },
-    ...conversationHistory.map((m) => {
-      if (m.role === "system") return { role: "system", content: m.content as string };
-      if (m.role === "user") return { role: "user", content: m.content as any };
-      if (m.role === "tool") return { role: "tool", tool_call_id: m.tool_call_id, name: m.name, content: m.content as string };
-      return {
-        role: "assistant",
-        content: m.content as string,
-        ...(m.tool_calls ? { tool_calls: m.tool_calls } : {})
-      };
-    }),
-    { role: "user", content: query as any },
-  ];
+  const llm = new ChatGroq({
+    apiKey: env.GROQ_API_KEY,
+    model: model || "openai/gpt-oss-120b",
+    temperature: 0.3,
+    maxTokens: 4096,
+    maxRetries: 3
+  });
 
-  const createStream = () =>
-    groq.chat.completions.create(
-      {
-        messages,
-        model: model || "openai/gpt-oss-120b",
-        temperature: 0.3,
-        max_tokens: 4096,
-        top_p: 0.9,
-        stream: true,
-        tools: (erpMode === "DB" ? erpTools : erpApiTools) as any,
-      },
-      { signal: abortSignal }
-    ) as any;
+  const llmWithTools = llm.bindTools(tools);
 
-  let stream: any;
   try {
-    stream = await withRetry(createStream, {
-      maxRetries: 2,
-      baseDelayMs: 500,
-      shouldRetry: (err) => isRetryableError(err),
-    });
-  } catch (error) {
-    onDone();
-    return;
-  }
-
-  let functionName = "";
-  let functionArgs = "";
-  let toolCallId = "";
-
-  for await (const chunk of stream) {
-    const delta = chunk.choices?.[0]?.delta;
-    if (delta?.tool_calls) {
-      const tc = delta.tool_calls[0];
-      if (tc.id) toolCallId = tc.id;
-      if (tc.function?.name) functionName += tc.function.name;
-      if (tc.function?.arguments) functionArgs += tc.function.arguments;
-    } else {
-      const token = delta?.content || "";
-      if (token) {
-        onToken(token);
-      }
-    }
-  }
-
-  // If a tool was called, execute it and get the follow-up response
-  if ((functionName === "query_erp_sql" || functionName === "query_erp_api") && functionArgs) {
-    onToken(`\n\n*⏳ Mengambil data ${functionName === "query_erp_api" ? "via API Endpoint" : "langsung dari ERP Database"}...*\n`);
-    let dataOut;
-    let queryArgs;
+    let depth = 0;
     
-    try {
-      queryArgs = JSON.parse(functionArgs);
-      if (functionName === "query_erp_sql") {
-        dataOut = await ErpService.executeReadOnlySQL(queryArgs.sql_query);
-      } else {
-        dataOut = await ErpService.executeMockApi(queryArgs.endpoint, queryArgs.queryParams, currentUserDivision);
-      }
-    } catch (err: any) {
-      dataOut = { error: err.message };
-    }
+    while (depth < MAX_TOOL_DEPTH) {
+      const stream = await llmWithTools.stream(lcHistory, { signal: abortSignal });
+      
+      let fullContent = "";
+      let toolCallsAccumulator: any = {};
 
-    // Append tool call and result to history
-    messages.push({
-      role: "assistant",
-      content: "",
-      tool_calls: [
-        {
-          id: toolCallId,
-          type: "function",
-          function: { name: functionName, arguments: functionArgs },
-        },
-      ],
-    });
-    messages.push({
-      role: "tool",
-      tool_call_id: toolCallId,
-      name: functionName,
-      content: JSON.stringify(dataOut, (key, value) => 
-        typeof value === 'bigint' ? value.toString() : value
-      ),
-    });
-
-    // Make the follow-up stream call
-    const createFollowupStream = () =>
-      groq.chat.completions.create(
-        {
-          messages,
-          model: model || "openai/gpt-oss-120b",
-          temperature: 0.3,
-          max_tokens: 4096,
-          top_p: 0.9,
-          stream: true,
-          tools: (erpMode === "DB" ? erpTools : erpApiTools) as any,
-        },
-        { signal: abortSignal }
-      ) as any;
-
-    try {
-      const followupStream: any = await withRetry(createFollowupStream, {
-        maxRetries: 2,
-        baseDelayMs: 500,
-        shouldRetry: (err) => isRetryableError(err),
-      });
-
-      for await (const chunk of followupStream) {
-        const token = chunk.choices?.[0]?.delta?.content || "";
-        if (token) {
-          onToken(token);
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          fullContent += chunk.content;
+          onToken(chunk.content.toString());
+        }
+        
+        if (chunk.tool_calls && chunk.tool_calls.length > 0) {
+          for (const tc of chunk.tool_calls) {
+            const tcAny = tc as any;
+            const idx = tcAny.index || tcAny.id || tcAny.name || 0;
+            if (!toolCallsAccumulator[idx]) {
+              toolCallsAccumulator[idx] = { id: tc.id, name: tc.name, args: "" };
+              const displayName = tc.name === "query_erp_sql" ? "ERP Database" : "API Endpoint";
+              onToken(`\n\n*⏳ Mengambil data dari ${displayName}...*\n`);
+            }
+            if (tc.args) {
+              toolCallsAccumulator[idx].args += JSON.stringify(tc.args);
+            }
+          }
         }
       }
-    } catch (err) {
-      console.error("[Groq] Follow-up stream failed", err);
-    }
-  }
+      
+      const toolCalls = Object.values(toolCallsAccumulator) as any[];
+      
+      if (toolCalls.length === 0) {
+        break; // No more tool calls, we are done
+      }
+      
+      // Parse arguments
+      for (const tc of toolCalls) {
+        try {
+          if (tc.args && typeof tc.args === "string" && tc.args.startsWith('"')) {
+            tc.args = JSON.parse(tc.args);
+          }
+        } catch(e) {}
+      }
 
-  onDone();
+      lcHistory.push(new AIMessage({
+        content: fullContent,
+        tool_calls: toolCalls
+      }));
+      
+      for (const toolCall of toolCalls) {
+        const tool = tools.find(t => t.name === toolCall.name);
+        if (tool) {
+          const result = await (tool as any).invoke(toolCall.args);
+          lcHistory.push(new ToolMessage({
+            tool_call_id: toolCall.id || "",
+            content: result
+          }));
+        }
+      }
+      
+      depth++;
+    }
+  } catch (err: any) {
+    if (err.name !== 'AbortError') {
+      console.error("[Groq Service] Streaming error:", err);
+    }
+  } finally {
+    onDone();
+  }
 };

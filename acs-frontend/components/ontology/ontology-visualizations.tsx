@@ -1529,8 +1529,8 @@ export const EnhancedOntologyContent = ({
                             {/* Relation context/evidence */}
                             {relation.text && (
                               <div className="mt-3 p-2 bg-gray-50 rounded text-xs text-gray-600 border">
-                                <span className="font-medium">Context: </span>"
-                                {relation.text}"
+                                <span className="font-medium">Context: </span>&quot;
+                                {relation.text}&quot;
                               </div>
                             )}
 

@@ -85,6 +85,14 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
+    // Block soft-deleted/deactivated users
+    if (user.clearanceLevel === 0 || user.name?.startsWith("[DELETED]")) {
+      return res.status(403).json({
+        success: false,
+        message: "Akun telah dinonaktifkan. Hubungi administrator.",
+      });
+    }
+
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel, type: "access" },
       env.JWT_SECRET,
@@ -195,19 +203,32 @@ export const refreshToken = async (req: Request, res: Response) => {
         .status(404)
         .json({ success: false, message: "User not found" });
 
+    // Block soft-deleted/deactivated users from refreshing
+    if (user.clearanceLevel === 0 || user.name?.startsWith("[DELETED]")) {
+      res.clearCookie("refreshToken", { path: "/api/auth" });
+      return res.status(403).json({ success: false, message: "Akun telah dinonaktifkan." });
+    }
+
     const newAccessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel, type: "access" },
       env.JWT_SECRET,
       { expiresIn: "1h" },
     );
 
-    // A7: Update cookie with potentially rotated refresh
-    res.cookie("refreshToken", incomingToken, REFRESH_COOKIE_OPTIONS);
+    // A7: Rotate refresh token — issue a new one each time
+    const newRefreshToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role, divisionId: user.divisionId, clearanceLevel: user.clearanceLevel, type: "refresh" },
+      env.JWT_REFRESH_SECRET,
+      { expiresIn: "7d" },
+    );
+
+    res.cookie("refreshToken", newRefreshToken, REFRESH_COOKIE_OPTIONS);
 
     res.status(200).json({
       success: true,
       data: {
         accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
         expiresAt: new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString(),
         remainingTime: 1 * 60 * 60,
       },

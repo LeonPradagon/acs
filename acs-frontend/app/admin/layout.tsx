@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, FileText, Database, ArrowLeft, Shield, Loader2, Menu, X } from "lucide-react";
+import { Users, FileText, Database, ArrowLeft, Shield, Loader2, Menu, X, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -40,6 +40,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "User Management", href: "/admin/users", icon: Users },
     { name: "Knowledge Base", href: "/admin/documents", icon: FileText },
     { name: "System Integrations", href: "/admin/integrations", icon: Database },
+    { name: "AI Brain & Context", href: "/admin/ai-brain", icon: Brain },
   ];
 
   if (!mounted || !isAuthorized) {

@@ -75,9 +75,9 @@ export class ErpService {
 
   /**
    * Validate that a query is safe to execute (SELECT-only, no mutation keywords).
-   * Throws an error if the query is unsafe.
+   * Throws an error if the query is unsafe. Appends a LIMIT of 500 if none is present.
    */
-  private static validateReadOnlyQuery(query: string): void {
+  private static validateReadOnlyQuery(query: string): string {
     const upperQuery = query.toUpperCase();
     const disallowedVerbs = [
       "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
@@ -100,6 +100,14 @@ export class ErpService {
     if (query.includes(";")) {
       throw new Error("Execution blocked: Multi-statement queries are not allowed.");
     }
+
+    // Append limit if not present
+    let modifiedQuery = query.trim();
+    if (!upperQuery.includes("LIMIT")) {
+      modifiedQuery = `${modifiedQuery} LIMIT 500`;
+    }
+
+    return modifiedQuery;
   }
 
   /**
@@ -107,10 +115,10 @@ export class ErpService {
    * Wraps execution in a READ ONLY transaction for defense-in-depth.
    */
   static async executeReadOnlySQL(query: string, userDivisionId?: string | null): Promise<any[]> {
-    // 1. Application-level validation
-    this.validateReadOnlyQuery(query);
+    // 1. Application-level validation and formatting
+    const sanitizedQuery = this.validateReadOnlyQuery(query);
 
-    console.log(`[ERP Service] Executing LLM-generated SQL: ${query}`);
+    console.log(`[ERP Service] Executing LLM-generated SQL: ${sanitizedQuery}`);
     
     try {
       // Fetch dynamic DB URL from settings
@@ -122,7 +130,7 @@ export class ErpService {
         try {
           // Defense-in-depth: force READ ONLY transaction at database level
           await client.query("BEGIN TRANSACTION READ ONLY");
-          const res = await client.query(query);
+          const res = await client.query(sanitizedQuery);
           await client.query("COMMIT");
           return res.rows;
         } catch (err) {
@@ -137,7 +145,7 @@ export class ErpService {
       // For Prisma mock DB: wrap in read-only transaction
       const results: any[] = await prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
-        return tx.$queryRawUnsafe(query);
+        return tx.$queryRawUnsafe(sanitizedQuery);
       });
       return results;
     } catch (error: any) {

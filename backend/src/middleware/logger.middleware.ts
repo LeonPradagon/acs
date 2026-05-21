@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { logger } from "../common/logger";
 
 /**
  * Request logging middleware — logs each request with method, path, status, and duration.
@@ -19,17 +20,16 @@ export const requestLogger = (
     const method = req.method;
     const path = req.originalUrl || req.path;
 
-    // Color-coded level based on status code
-    const level =
-      statusCode >= 500
-        ? "ERROR"
-        : statusCode >= 400
-          ? "WARN"
-          : "INFO";
+    const message = `${method} ${path} → ${statusCode} (${duration}ms)`;
 
-    console.log(
-      `[${level}] ${method} ${path} → ${statusCode} (${duration}ms) [${requestId}]`,
-    );
+    // Select correct structured log level based on status code
+    if (statusCode >= 500) {
+      logger.error(message, "HTTP", { method, path, statusCode, duration }, requestId);
+    } else if (statusCode >= 400) {
+      logger.warn(message, "HTTP", { method, path, statusCode, duration }, requestId);
+    } else {
+      logger.info(message, "HTTP", { method, path, statusCode, duration }, requestId);
+    }
   });
 
   next();
