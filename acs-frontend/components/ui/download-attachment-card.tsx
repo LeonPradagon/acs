@@ -76,7 +76,7 @@ export function DownloadAttachmentCard({
   };
 
   return (
-    <Card className="flex items-center gap-4 p-4 mt-4 w-fit border border-[#FF5E00]/20 bg-[#FF5E00]/5 shadow-sm rounded-xl">
+    <Card className="flex items-center gap-4 p-4 mt-4 w-fit border border-[#D97757]/20 bg-[#D97757]/5 shadow-sm rounded-xl">
       <div className="bg-white p-2 rounded-lg shadow-sm border">{getIcon()}</div>
       <div className="flex flex-col">
         <span className="font-medium text-sm text-foreground truncate max-w-[200px] mb-1">
@@ -87,7 +87,7 @@ export function DownloadAttachmentCard({
       <Button
         onClick={handleDownload}
         size="sm"
-        className="ml-4 bg-[#FF5E00] hover:bg-[#FF8A00] text-white transition-all shadow-md group"
+        className="ml-4 bg-[#D97757] hover:bg-[#C2674A] text-white transition-all shadow-md group"
       >
         <Download className="w-4 h-4 mr-2 group-hover:-translate-y-0.5 transition-transform" />
         Download

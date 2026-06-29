@@ -197,12 +197,12 @@ export const ChatMessageView = ({
               "text-[15px] leading-[1.7] text-foreground font-light tracking-tight",
               isAssistant
                 ? "bg-transparent py-1"
-                : "bg-[var(--surface-container-highest)] dark:bg-[var(--surface-variant)] p-5 rounded-[1.5rem] rounded-tr-sm shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.2)]",
+                : "inline-block text-left w-fit max-w-full bg-[var(--surface-container-highest)] dark:bg-[var(--surface-variant)] py-3 px-5 rounded-[1.5rem] rounded-tr-sm shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.2)]",
             )}
           >
             {isEditing ? (
               /* Edit Mode */
-              <div className="space-y-2">
+              <div className="space-y-2 min-w-[250px] sm:min-w-[350px]">
                 <Textarea
                   ref={editRef}
                   value={editContent}
@@ -277,6 +277,7 @@ export const ChatMessageView = ({
                         key={idx}
                         className="relative w-32 h-32 rounded-lg overflow-hidden border border-border/50 shadow-sm cursor-pointer group bg-black/5"
                       >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={imgBase64}
                           alt={`Uploaded attachment ${idx}`}

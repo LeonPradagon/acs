@@ -37,6 +37,19 @@ import {
   DropdownMenuTrigger,
   DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from "@/components/ui/command";
 
 interface ChatSidebarProps {
   sessions: ChatSessionItem[];
@@ -79,6 +92,7 @@ export function ChatSidebar({
 
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -214,25 +228,22 @@ export function ChatSidebar({
               )}
             </Button>
 
-            {/* Search Input Bar (only when expanded) */}
+            {/* Search Trigger Button */}
             <div
               className={cn(
-                "relative transition-all duration-300",
+                "relative transition-all duration-300 cursor-pointer group",
                 isOpen
                   ? "opacity-100 h-10 mt-1"
                   : "opacity-0 h-0 w-0 overflow-hidden mt-0",
               )}
+              onClick={() => setIsSearchModalOpen(true)}
             >
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-4 w-4 text-muted-foreground/60" />
+                <Search className="h-4 w-4 text-muted-foreground/60 group-hover:text-foreground/80 transition-colors" />
               </div>
-              <Input
-                type="text"
-                placeholder="Search chats..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-black/5 dark:bg-black/30 border-none pl-9 rounded-2xl h-10 text-sm shadow-inner focus-visible:ring-1 focus-visible:ring-primary/50 text-foreground placeholder:text-muted-foreground/50 transition-colors"
-              />
+              <div className="flex items-center w-full bg-black/5 dark:bg-black/30 border-none pl-9 rounded-2xl h-10 text-sm shadow-inner text-muted-foreground/70 transition-colors group-hover:bg-black/10 dark:group-hover:bg-black/40">
+                Search chats and projects
+              </div>
             </div>
           </div>
 
@@ -244,69 +255,27 @@ export function ChatSidebar({
                 !isOpen && "flex flex-col items-center",
               )}
             >
-              {searchQuery.trim().length >= 2 ? (
-                isSearching ? (
-                  <div className="flex flex-col items-center justify-center p-8 text-center mt-4 w-full">
-                    <RefreshCw className="w-6 h-6 text-primary animate-spin mb-3" />
-                    <p className="text-xs text-muted-foreground">Searching history...</p>
-                  </div>
-                ) : searchResults.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center p-8 text-center mt-4 w-full">
-                    <div className="w-12 h-12 rounded-2xl bg-muted/50 flex items-center justify-center mb-3">
-                      <Search className="w-6 h-6 text-muted-foreground/30" />
-                    </div>
-                    <p className="text-sm font-medium text-muted-foreground/60">Tidak ditemukan</p>
-                  </div>
-                ) : (
-                  searchResults.map((res) => (
-                    <button
-                      key={res.id}
-                      onClick={() => {
-                        onSelectSession(res.sessionId);
-                        setSearchQuery("");
-                      }}
-                      className={cn(
-                        "w-full text-left p-3 rounded-2xl border bg-gradient-to-br transition-all duration-300 hover:scale-[1.01] hover:shadow focus:outline-none mb-2 border-border/50",
-                        currentSessionId === res.sessionId
-                          ? "from-primary/10 to-transparent border-primary/20"
-                          : "from-muted/50 to-muted/20 hover:from-muted/80"
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-bold text-foreground/80 truncate max-w-[150px]">
-                          {res.session?.title || "New Chat"}
-                        </span>
-                        <span className="text-[9px] text-muted-foreground/60 font-mono">
-                          {new Date(res.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground/80 leading-relaxed line-clamp-2 italic">
-                        &quot;{highlightText(res.content, searchQuery)}&quot;
-                      </p>
-                    </button>
-                  ))
-                )
-              ) : filteredSessions.length === 0 ? (
+              {sessions.length === 0 ? (
                 isOpen ? (
                   <div className="flex flex-col items-center justify-center p-8 text-center mt-4">
                     <div className="w-12 h-12 rounded-2xl bg-muted/50 flex items-center justify-center mb-3">
                       <MessageSquare className="w-6 h-6 text-muted-foreground/30" />
                     </div>
                     <p className="text-sm font-medium text-muted-foreground/60">
-                      {searchQuery ? "Tidak ditemukan" : "Belum ada percakapan"}
+                      Belum ada percakapan
                     </p>
                   </div>
                 ) : null
               ) : (
-                filteredSessions.map((session) => (
+                sessions.map((session) => (
                   <div
                     key={session.id}
                     className={cn(
                       "group relative font-sans transition-all ease-in-out duration-300",
                       isOpen ? "rounded-[12px]" : "rounded-[12px]",
                       currentSessionId === session.id
-                        ? "bg-black/5 dark:bg-[#FF5E00] dark:shadow-[0_4px_12px_rgba(255,94,0,0.3)] shadow-sm"
-                        : "bg-transparent hover:bg-black/5 dark:hover:bg-[#FF5E00]/10 transition-colors",
+                        ? "bg-black/5 dark:bg-[#D97757] dark:shadow-[0_4px_12px_rgba(217,119,87,0.3)] shadow-sm"
+                        : "bg-transparent hover:bg-black/5 dark:hover:bg-[#D97757]/10 transition-colors",
                       !isOpen &&
                         "w-11 h-11 mx-auto flex items-center justify-center shrink-0",
                     )}
@@ -325,7 +294,7 @@ export function ChatSidebar({
                           onChange={(e) => setEditTitle(e.target.value)}
                           onKeyDown={handleKeyDown}
                           onBlur={confirmRename}
-                          className="h-8 text-sm px-2 bg-background border-border flex-1 min-w-0 rounded-lg shadow-inner focus-visible:ring-1 focus-visible:ring-[#FF5E00]"
+                          className="h-8 text-sm px-2 bg-background border-border flex-1 min-w-0 rounded-lg shadow-inner focus-visible:ring-1 focus-visible:ring-[#D97757]"
                         />
                         <div className="flex items-center gap-1 shrink-0">
                           <button
@@ -371,7 +340,7 @@ export function ChatSidebar({
                               "flex items-center justify-center transition-colors duration-300 shrink-0",
                               currentSessionId === session.id
                                 ? "text-foreground dark:text-white"
-                                : "text-muted-foreground group-hover/item:text-foreground dark:group-hover/item:text-[#FF5E00] opacity-70 group-hover/item:opacity-100",
+                                : "text-muted-foreground group-hover/item:text-foreground dark:group-hover/item:text-[#D97757] opacity-70 group-hover/item:opacity-100",
                             )}
                           >
                             <MessageSquare
@@ -417,17 +386,17 @@ export function ChatSidebar({
                               </DropdownMenuTrigger>
                               <DropdownMenuPortal>
                                 <DropdownMenuContent
-                                  align="end"
-                                  side="right"
+                                  align="start"
+                                  side="bottom"
                                   sideOffset={5}
-                                  className="w-48 p-1 bg-background border border-border shadow-xl rounded-xl z-[99999] animate-in fade-in zoom-in-95 duration-200"
+                                  className="w-40 p-2 bg-background/95 backdrop-blur-xl border border-border/50 shadow-xl rounded-2xl z-[99999] animate-in fade-in zoom-in-95 duration-200"
                                 >
                                   {onRenameSession && (
                                     <DropdownMenuItem
                                       onSelect={() => {
                                         startRename(session);
                                       }}
-                                      className="cursor-pointer flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent focus:bg-accent outline-none"
+                                      className="cursor-pointer flex items-center gap-3 px-3 py-2.5 text-[13px] font-medium rounded-xl hover:bg-muted focus:bg-muted outline-none transition-colors"
                                     >
                                       <Pencil className="w-4 h-4 text-muted-foreground" />
                                       <span>Rename</span>
@@ -437,7 +406,7 @@ export function ChatSidebar({
                                     onSelect={() => {
                                       onDeleteSession(session.id);
                                     }}
-                                    className="cursor-pointer flex items-center gap-2 px-3 py-2 text-sm text-destructive rounded-md hover:bg-destructive/10 focus:bg-destructive/10 focus:text-destructive outline-none mt-1"
+                                    className="cursor-pointer flex items-center gap-3 px-3 py-2.5 text-[13px] font-medium text-destructive rounded-xl hover:bg-destructive/10 focus:bg-destructive/10 focus:text-destructive outline-none mt-1 transition-colors"
                                   >
                                     <Trash2 className="w-4 h-4" />
                                     <span>Delete</span>
@@ -530,6 +499,26 @@ export function ChatSidebar({
                       <Mail className="w-4 h-4 text-muted-foreground" /> Email
                     </DropdownMenuItem>
 
+                    {mounted && (
+                      <DropdownMenuItem
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          setTheme(resolvedTheme === "dark" ? "light" : "dark");
+                        }}
+                        className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors"
+                      >
+                        {resolvedTheme === "dark" ? (
+                          <>
+                            <Sun className="w-4 h-4 text-muted-foreground" /> Switch to Light Mode
+                          </>
+                        ) : (
+                          <>
+                            <Moon className="w-4 h-4 text-muted-foreground" /> Switch to Dark Mode
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                    )}
+
                     <DropdownMenuItem
                       disabled={!isAdmin}
                       onSelect={() => {
@@ -577,6 +566,93 @@ export function ChatSidebar({
           </button>
         </div>
       </div>
+      {/* Search Modal */}
+      <Dialog 
+        open={isSearchModalOpen} 
+        onOpenChange={(open) => {
+          setIsSearchModalOpen(open);
+          if (!open) setSearchQuery("");
+        }}
+      >
+        <DialogContent className="overflow-hidden p-0 max-w-2xl bg-[#1c1c1c] text-zinc-200 border-zinc-800 shadow-2xl" showCloseButton={false}>
+          <DialogTitle className="sr-only">Search chats and projects</DialogTitle>
+          <Command 
+            shouldFilter={false} 
+            className="bg-transparent"
+          >
+            <div className="flex items-center border-b border-white/10 px-4 h-14">
+              <Search className="mr-3 h-5 w-5 shrink-0 text-zinc-400" />
+              <input 
+                placeholder="Search chats and projects" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="flex h-full w-full bg-transparent py-3 text-[15px] outline-none placeholder:text-zinc-500 text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              <button 
+                onClick={() => {
+                  setIsSearchModalOpen(false);
+                  setSearchQuery("");
+                }} 
+                className="ml-2 rounded-md p-1 opacity-50 hover:opacity-100 hover:bg-white/10 transition-colors"
+              >
+                 <X className="h-5 w-5 text-zinc-400" />
+              </button>
+            </div>
+            
+            <CommandList className="max-h-[60vh] p-2">
+              {searchQuery.trim().length >= 2 ? (
+                isSearching ? (
+                  <div className="py-12 text-center text-sm text-zinc-500">Searching...</div>
+                ) : searchResults.length === 0 ? (
+                  <div className="py-12 text-center text-sm text-zinc-500">No results found.</div>
+                ) : (
+                  <CommandGroup>
+                    {searchResults.map((res) => (
+                      <CommandItem
+                        key={res.id}
+                        value={res.id}
+                        onSelect={() => {
+                          onSelectSession(res.sessionId);
+                          setIsSearchModalOpen(false);
+                          setSearchQuery("");
+                        }}
+                        className="flex items-center gap-3 px-4 py-3.5 text-[15px] aria-selected:bg-[#2c2c2c] aria-selected:text-white cursor-pointer rounded-xl mb-1 text-zinc-300"
+                      >
+                        <MessageSquare className="h-4 w-4 shrink-0 opacity-70" />
+                        <span className="flex-1 truncate font-medium">{res.session?.title || "New Chat"}</span>
+                        <span className="text-[13px] text-zinc-500 ml-auto">
+                          {new Date(res.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )
+              ) : (
+                <CommandGroup>
+                  {sessions.slice(0, 10).map((session) => (
+                    <CommandItem
+                      key={session.id}
+                      value={session.id}
+                      onSelect={() => {
+                        onSelectSession(session.id);
+                        setIsSearchModalOpen(false);
+                        setSearchQuery("");
+                      }}
+                      className="flex items-center gap-3 px-4 py-3.5 text-[15px] aria-selected:bg-[#2c2c2c] aria-selected:text-white cursor-pointer rounded-xl mb-1 text-zinc-300"
+                    >
+                      <MessageSquare className="h-4 w-4 shrink-0 opacity-70" />
+                      <span className="flex-1 truncate font-medium">{session.title || "New Chat"}</span>
+                      <span className="text-[13px] text-zinc-500 ml-auto">
+                        Past history
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

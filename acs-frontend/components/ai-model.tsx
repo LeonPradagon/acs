@@ -20,6 +20,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Bot,
   Brain,
   Send,
@@ -38,6 +44,8 @@ import {
   Code,
   Lightbulb,
   ImageIcon,
+  Plus,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -58,119 +66,84 @@ import { ChatMessage } from "@/types/chat";
 // Welcome Screen Component
 // ============================================================
 
-const SUGGESTED_PROMPTS: any[] = [
-  {
-    icon: Sparkles,
-    title: "Kebijakan DDoS",
-    desc: "Bagaimana cara melakukan mitigasi serangan siber DDoS?",
-    prompt: "Bagaimana cara melakukan mitigasi serangan siber DDoS?",
-    color: "from-blue-500/5 to-indigo-500/5 border-blue-500/10 hover:border-blue-500/30 text-blue-500"
-  },
-  {
-    icon: Brain,
-    title: "Karyawan IT",
-    desc: "Berapa total karyawan di divisi IT saat ini?",
-    prompt: "Berapa total karyawan di divisi IT saat ini?",
-    color: "from-purple-500/5 to-pink-500/5 border-purple-500/10 hover:border-purple-500/30 text-purple-500"
-  },
-  {
-    icon: Code,
-    title: "Gaji HRD",
-    desc: "Tampilkan data gaji karyawan di divisi HRD",
-    prompt: "Tampilkan data gaji karyawan di divisi HRD",
-    color: "from-emerald-500/5 to-teal-500/5 border-emerald-500/10 hover:border-emerald-500/30 text-emerald-500"
-  },
-  {
-    icon: FileText,
-    title: "Ringkasan Kebijakan",
-    desc: "Ringkas dokumen kebijakan keamanan yang baru diunggah",
-    prompt: "Ringkas dokumen kebijakan keamanan yang baru diunggah",
-    color: "from-orange-500/5 to-amber-500/5 border-orange-500/10 hover:border-orange-500/30 text-orange-500"
-  }
-];
-
 function WelcomeScreen({
-  onPromptClick,
   userName,
 }: {
-  onPromptClick: (prompt: string) => void;
   userName: string;
 }) {
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const [greeting, setGreeting] = useState("Selamat datang");
+
+  useEffect(() => {
+    setMounted(true);
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 11) setGreeting("Selamat pagi");
+    else if (hour >= 11 && hour < 15) setGreeting("Selamat siang");
+    else if (hour >= 15 && hour < 18) setGreeting("Selamat sore");
+    else setGreeting("Selamat malam");
+  }, []);
 
   return (
     <div 
       className={cn(
-        "flex flex-col items-center justify-center h-full max-w-2xl mx-auto px-6 transition-all duration-1000 ease-out pb-[12vh]",
-        mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+        "flex flex-col items-center justify-center w-full transition-all duration-1000 ease-out pointer-events-auto",
+        mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
       )}
     >
-      {/* Header Area */}
-      <div className="flex flex-col items-center mb-6 text-center">
-        <img
-          src="/images/Asisgo.png"
-          alt="Logo"
-          className="w-16 h-16 object-contain mb-3"
-        />
-        <div className="flex flex-col leading-tight">
-          <span className="text-2xl font-black text-foreground uppercase tracking-tight">
-            ACS
-          </span>
-          <span className="text-[10px] font-bold tracking-[0.3em] text-muted-foreground/40 uppercase">
-            Assistant
+      <div className="flex flex-row flex-wrap items-center justify-center gap-3 md:gap-4 mb-6 px-4">
+        <div className="flex items-center gap-2 md:gap-3">
+          <img
+            src="/images/Asisgo.png"
+            alt="Logo"
+            className="w-8 h-8 md:w-10 md:h-10 object-contain drop-shadow-sm"
+          />
+          <span className="text-base md:text-xl font-bold text-foreground tracking-tight">
+            Asisgo Core Sovereign
           </span>
         </div>
-      </div>
-
-      {/* Greeting Section */}
-      <div className="text-center mb-8">
-        <h2 className="text-3xl lg:text-4xl font-bold text-foreground tracking-tight leading-tight">
-          Hi, {userName.split(" ")[0]}.
-          <br />
-          Apa yang bisa saya bantu hari ini?
+        
+        <div className="h-5 md:h-7 w-[2px] bg-black/20 dark:bg-white/20 rounded-full mx-1 md:mx-2" />
+        
+        <h2 className="text-base md:text-xl font-medium text-muted-foreground tracking-tight">
+          {greeting}, {userName.split(" ")[0]}
         </h2>
-      </div>
-
-      {/* Suggested Prompts Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full mb-8">
-        {SUGGESTED_PROMPTS.map((item, idx) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={idx}
-              onClick={() => onPromptClick(item.prompt)}
-              className={cn(
-                "flex flex-col items-start text-left p-4 rounded-2xl border bg-gradient-to-br transition-all duration-300 hover:scale-[1.02] hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/20",
-                item.color || "from-muted/50 to-muted border-border/50"
-              )}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <div className="p-1.5 rounded-xl bg-white/50 dark:bg-black/30 backdrop-blur-sm border border-black/5 dark:border-white/5">
-                  <Icon className="w-4 h-4 text-inherit" />
-                </div>
-                <span className="text-xs font-bold tracking-wide uppercase text-foreground/80">
-                  {item.title}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-                {item.desc}
-              </p>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Minimal Footer */}
-      <div className="flex flex-col items-center gap-2 opacity-30 mt-4">
-        <div className="w-px h-6 bg-foreground" />
-        <span className="text-[8px] font-bold tracking-[0.4em] uppercase text-foreground">
-          Asisgo Core Sovereign
-        </span>
       </div>
     </div>
   );
 }
+
+const ImagePreviewThumb = ({ file, onRemove }: { file: File; onRemove: () => void }) => {
+  const [src, setSrc] = useState<string>("");
+  
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(file);
+    setSrc(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+
+  return (
+    <div className="relative flex items-center justify-center w-14 h-14 bg-muted/50 border border-border/50 rounded-xl group overflow-visible shrink-0 shadow-sm">
+      {src && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img 
+          src={src} 
+          alt={file.name} 
+          className="w-full h-full object-cover rounded-xl"
+        />
+      )}
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          onRemove();
+        }}
+        className="absolute -top-2 -right-2 w-5 h-5 flex items-center justify-center bg-background border border-border/80 rounded-full text-muted-foreground hover:bg-destructive hover:text-white hover:border-destructive transition-all shadow-sm z-10"
+        title="Hapus gambar"
+      >
+        <X className="w-2.5 h-2.5" />
+      </button>
+    </div>
+  );
+};
 
 // ============================================================
 // Main Component
@@ -193,7 +166,19 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
   const [userName, setUserName] = useState<string>("User");
   const [userRole, setUserRole] = useState<string>("user");
   const [isEmailSettingsOpen, setIsEmailSettingsOpen] = useState(false);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const uploadMenuRef = useRef<HTMLDivElement>(null);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (uploadMenuRef.current && !uploadMenuRef.current.contains(event.target as Node)) {
+        setIsUploadOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     try {
@@ -240,7 +225,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [chat.isProcessing, chat.isSidebarOpen]);
+  }, [chat]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -278,13 +263,17 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
       }));
 
       if (!rag.isUploading) {
-        const success = await rag.uploadDocuments();
-        if (!success) return; // Stop if upload failed
-
+        // Wait, if it wasn't uploaded (e.g. failed), try again
+        // But normally it's already uploaded. We just call it without files to catch any unuploaded ones.
+        // Actually, since it auto-uploads, we can just clear the UI.
+        
         // Minor sync delay to ensure the backend DB commit/ES refresh is complete
         // before the first query attempts retrieval.
         await new Promise((resolve) => setTimeout(resolve, 1200));
       }
+
+      // Clear the RAG files from the UI after sending
+      rag.setUploadedFiles([]);
     }
 
     let base64Images: string[] = [];
@@ -353,18 +342,19 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
         <div className="flex flex-col flex-1 h-full bg-background relative min-w-0">
           {props.workspaceHeader && React.isValidElement(props.workspaceHeader) 
             ? React.cloneElement(props.workspaceHeader as React.ReactElement<any>, { 
-                onMenuToggle: () => chat.setIsSidebarOpen(!chat.isSidebarOpen) 
+                onMenuToggle: () => chat.setIsSidebarOpen(!chat.isSidebarOpen),
+                sessionTitle: chat.chatHistory.length > 0 && chat.chatHistory[0]?.id !== "welcome" 
+                  ? (chat.sessions.find(s => s.id === chat.currentSessionId)?.title || "New Chat") 
+                  : undefined,
+                onExport: chat.exportToMarkdown,
+                onCopy: chat.copyConversation,
+                onShare: () => alert("Share conversation functionality to be implemented")
               })
             : props.workspaceHeader}
 
           {/* Chat History */}
           <div className="flex-1 overflow-hidden relative">
-            {showWelcome ? (
-              <WelcomeScreen
-                onPromptClick={handlePromptClick}
-                userName={userName}
-              />
-            ) : (
+            {!showWelcome && (
               <ScrollArea className="h-full">
                 <div className="py-10 space-y-2">
                   {chat.chatHistory.map((message, index) => (
@@ -472,9 +462,13 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
             </div>
           )}
 
-          {/* Floating Pill Input */}
-          <div className="absolute bottom-6 left-0 right-0 px-6 flex justify-center pointer-events-none">
-            <div className="w-full max-w-3xl bg-white dark:bg-[var(--surface-container-low)] shadow-2xl dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] border border-black/5 dark:border-white/5 rounded-[2rem] p-3 flex flex-col gap-1 pointer-events-auto transition-all duration-300 focus-within:ring-4 focus-within:ring-primary/10 hover:border-border dark:hover:border-white/10 relative">
+          {/* Input Area */}
+          <div className={cn(
+            "absolute left-0 right-0 px-6 flex flex-col justify-center items-center pointer-events-none transition-all duration-500 ease-in-out",
+            showWelcome ? "top-[40%] -translate-y-1/2" : "bottom-6"
+          )}>
+            {showWelcome && <WelcomeScreen userName={userName} />}
+            <div className="w-full max-w-3xl flex flex-col gap-1 pointer-events-auto transition-all duration-300 relative">
               
               {/* Inline Upload UI (Above Input) */}
               <input
@@ -511,136 +505,148 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                 accept=".pdf,.txt,.docx,.csv,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,image/*"
               />
 
-              {imageFiles.length > 0 && (
-                <div className="px-3 pt-2 pb-1">
-                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto custom-scrollbar">
-                    {imageFiles.map((file, idx) => (
-                      <div
-                        key={`img-${file.name}-${idx}`}
-                        className="flex items-center gap-2 bg-muted/50 border border-border/50 rounded-xl px-3 py-1.5 text-sm group"
-                      >
-                        <ImageIcon className="w-3.5 h-3.5 text-blue-500" />
-                        <span className="max-w-[150px] truncate text-[11px] font-medium">
-                          {file.name}
-                        </span>
-                        <button
-                          onClick={() =>
-                            setImageFiles((prev) =>
-                              prev.filter((_, i) => i !== idx),
-                            )
-                          }
-                          className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {rag.uploadedFiles.length > 0 && (
-                <div className="px-3 pt-2 pb-1">
-                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto custom-scrollbar">
-                    {rag.uploadedFiles.map((file, idx) => (
-                      <div
-                        key={`${file.name}-${idx}`}
-                        className="flex items-center gap-2 bg-muted/50 border border-border/50 rounded-xl px-3 py-1.5 text-sm group"
-                      >
-                        <FileText className="w-3.5 h-3.5 text-indigo-500" />
-                        <span className="max-w-[150px] truncate text-[11px] font-medium">
-                          {file.name}
-                        </span>
-                        <button
-                          onClick={() => rag.removeFile(idx)}
-                          className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Upload Status / Progress */}
-                  {rag.isUploading && (
-                    <div className="mt-3 flex items-center gap-3 w-full px-1">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground whitespace-nowrap">
-                        Uploading... {rag.uploadProgress}%
-                      </span>
-                      <div className="h-1 flex-1 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary transition-all duration-300"
-                          style={{ width: `${rag.uploadProgress}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {rag.uploadError && (
-                    <div className="mt-2 text-[10px] text-destructive flex items-center gap-1 font-medium bg-destructive/10 px-2 py-1 rounded-md w-max">
-                      <AlertCircle className="w-3 h-3" /> {rag.uploadError}
-                    </div>
-                  )}
-                  {rag.showUploadSuccess && (
-                    <div className="mt-2 text-[10px] text-emerald-500 flex items-center gap-1 font-medium bg-emerald-500/10 px-2 py-1 rounded-md w-max">
-                      <CheckCircle className="w-3 h-3" /> {rag.uploadSuccess}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Chat Input */}
-              <div className="w-full relative">
-                <Textarea
-                  ref={chat.textareaRef}
-                  placeholder="Message ACS AI Assistant..."
-                  value={chat.query}
-                  onChange={handleTextareaChange}
-                  onKeyDown={handleKeyPress}
-                  className="w-full min-h-[56px] max-h-[250px] py-3.5 pl-4 pr-12 resize-none border-0 focus-visible:ring-0 text-[15px] bg-transparent text-foreground placeholder:text-muted-foreground/40 leading-relaxed shadow-none custom-scrollbar"
-                  disabled={chat.isProcessing || rag.isUploading}
-                  style={{ overflow: "hidden" }}
-                />
+              {/* Chat Input Container */}
+              <div className="w-full relative bg-transparent border border-border/50 rounded-[2rem] focus-within:ring-2 focus-within:ring-primary/10 focus-within:border-primary/30 transition-all shadow-sm flex flex-col">
                 
-                {/* Embedded Upload Button */}
-                <div className="absolute right-2 top-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={chat.isProcessing || rag.isUploading}
-                    className="h-9 w-9 text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-all rounded-full flex items-center justify-center"
-                    title="Upload context file"
-                  >
-                    <Upload className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+                {/* Uploaded Files & Progress Section (Top) */}
+                {(imageFiles.length > 0 || rag.uploadedFiles.length > 0) && (
+                  <div className="px-5 pt-4 pb-0 w-full max-h-32 overflow-y-auto custom-scrollbar flex flex-col gap-3">
+                    <div className="flex flex-wrap gap-3">
+                      {imageFiles.map((file, idx) => (
+                        <ImagePreviewThumb 
+                          key={`img-${file.name}-${idx}`} 
+                          file={file} 
+                          onRemove={() => {
+                            setImageFiles((prev) =>
+                              prev.filter((_, i) => i !== idx)
+                            );
+                          }} 
+                        />
+                      ))}
 
-              {/* Action Bar */}
-              <div className="px-2 pt-1 pb-1 flex items-center justify-between">
-                {/* Left Utilities */}
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 opacity-60 px-1 py-1 cursor-default">
-                    <Sparkles className="w-3.5 h-3.5 text-primary" />
-                    <span className="text-[10px] font-bold text-foreground uppercase tracking-widest hidden sm:inline-block">
-                      ACS AI Assistant
-                    </span>
+                      {rag.uploadedFiles.map((file, idx) => (
+                        <div
+                          key={`${file.name}-${idx}`}
+                          className="relative flex items-center gap-2 bg-muted/50 border border-border/50 rounded-xl pl-2.5 pr-4 py-1.5 text-sm group"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          <span className="max-w-[120px] truncate text-[11px] font-medium">
+                            {file.name}
+                          </span>
+                          <button
+                            onClick={() => rag.removeFile(idx)}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-background border border-border/80 rounded-full text-muted-foreground hover:bg-destructive hover:text-white hover:border-destructive transition-all shadow-sm z-10"
+                            title="Hapus file"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Upload Status / Progress */}
+                    {rag.isUploading && (
+                      <div className="flex items-center gap-3 w-full pb-2">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground whitespace-nowrap">
+                          Uploading... {rag.uploadProgress}%
+                        </span>
+                        <div className="h-1 flex-1 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-300"
+                            style={{ width: `${rag.uploadProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {rag.uploadError && (
+                      <div className="text-[10px] text-destructive flex items-center gap-1 font-medium bg-destructive/10 px-2 py-1 rounded-md w-max mb-2">
+                        <AlertCircle className="w-3 h-3" /> {rag.uploadError}
+                      </div>
+                    )}
+                    {rag.showUploadSuccess && (
+                      <div className="text-[10px] text-emerald-500 flex items-center gap-1 font-medium bg-emerald-500/10 px-2 py-1 rounded-md w-max mb-2">
+                        <CheckCircle className="w-3 h-3" /> {rag.uploadSuccess}
+                      </div>
+                    )}
                   </div>
-                </div>
+                )}
 
-                {/* Right Utilities */}
-                <div className="flex items-center gap-1 sm:gap-2">
-                  <Select
-                    value={chat.selectedModel}
-                    onValueChange={chat.setSelectedModel}
-                    disabled={false}
-                  >
-                    <SelectTrigger className="h-8 min-w-[120px] border-0 text-[11px] hover:bg-muted/40 font-mono bg-transparent shadow-none rounded-xl transition-colors">
-                      <SelectValue placeholder="Model" />
-                    </SelectTrigger>
-                    <SelectContent
-                      align="end"
+                {/* Text Input Area */}
+                <div className="relative w-full">
+                  <Textarea
+                    ref={chat.textareaRef}
+                    placeholder="Message ACS AI Assistant..."
+                    value={chat.query}
+                    onChange={handleTextareaChange}
+                    onKeyDown={handleKeyPress}
+                    className="w-full min-h-[56px] max-h-[200px] py-4 pl-12 pr-32 resize-none border-0 focus-visible:ring-0 text-[15px] bg-transparent text-foreground placeholder:text-muted-foreground/40 leading-relaxed shadow-none custom-scrollbar rounded-[2rem]"
+                    disabled={chat.isProcessing || rag.isUploading}
+                    style={{ overflowY: "auto" }}
+                  />
+                  
+                  {/* Embedded Upload Button (Left) */}
+                  <div className="absolute left-3 bottom-2.5 z-20" ref={uploadMenuRef}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setIsUploadOpen(!isUploadOpen);
+                      }}
+                      disabled={chat.isProcessing || rag.isUploading}
+                      className="h-9 w-9 text-muted-foreground !bg-transparent hover:!bg-transparent hover:opacity-70 hover:text-foreground transition-all rounded-full flex items-center justify-center focus-visible:ring-0"
+                      title="Upload options"
+                    >
+                      <Plus className={cn("w-5 h-5 transition-transform duration-300", isUploadOpen ? "rotate-45" : "rotate-0")} />
+                    </Button>
+
+                    {isUploadOpen && (
+                      <div className={cn(
+                        "absolute left-0 w-56 p-2 rounded-2xl shadow-xl border border-border/50 bg-background/95 backdrop-blur-xl z-[999] animate-in fade-in zoom-in-95 duration-200",
+                        showWelcome ? "top-full mt-2" : "bottom-full mb-2"
+                      )}>
+                        <button 
+                          className="flex items-center gap-3 w-full text-left py-2.5 px-3 rounded-xl hover:bg-muted transition-colors" 
+                          onClick={() => {
+                            fileInputRef.current?.click();
+                            setIsUploadOpen(false);
+                          }}
+                        >
+                          <FileText className="w-4 h-4 text-indigo-500" />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium">Document</span>
+                            <span className="text-[10px] text-muted-foreground">PDF, Word, Excel, CSV</span>
+                          </div>
+                        </button>
+                        <button 
+                          className="flex items-center gap-3 w-full text-left py-2.5 px-3 rounded-xl hover:bg-muted transition-colors mt-1" 
+                          onClick={() => {
+                            fileInputRef.current?.click();
+                            setIsUploadOpen(false);
+                          }}
+                        >
+                          <ImageIcon className="w-4 h-4 text-blue-500" />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium">Image</span>
+                            <span className="text-[10px] text-muted-foreground">JPG, PNG, GIF</span>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Embedded Model Selector (Right) */}
+                  <div className="absolute right-4 bottom-3 z-10">
+                    <Select
+                      value={chat.selectedModel}
+                      onValueChange={chat.setSelectedModel}
+                      disabled={false}
+                    >
+                      <SelectTrigger className="h-8 w-fit min-w-[90px] border-0 !bg-transparent hover:!bg-transparent text-[11px] hover:opacity-70 font-mono shadow-none rounded-xl transition-all">
+                        <SelectValue placeholder="Model" />
+                      </SelectTrigger>
+                      <SelectContent
+                        align="end"
                       className="text-[11px] font-mono rounded-xl border-border/50 shadow-xl backdrop-blur-xl"
                     >
                       {Object.entries(AVAILABLE_MODELS).map(([id, model]) => (
@@ -650,54 +656,11 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                       ))}
                     </SelectContent>
                   </Select>
-
-                  <div className="flex gap-1 hidden sm:flex">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={chat.exportToMarkdown}
-                      title="Export ke Markdown"
-                      className="h-8 w-8 hover:bg-muted/40 text-muted-foreground hover:text-foreground rounded-full transition-all"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={chat.copyConversation}
-                      title="Copy percakapan"
-                      className="h-8 w-8 hover:bg-muted/40 text-muted-foreground hover:text-foreground rounded-full transition-all"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-
-                  <Button
-                    onClick={handleSendMessage}
-                    disabled={
-                      (!chat.query.trim() &&
-                        rag.uploadedFiles.length === 0 &&
-                        imageFiles.length === 0) ||
-                      chat.isProcessing ||
-                      rag.isUploading
-                    }
-                    className={cn(
-                      "h-9 w-9 xl:w-10 xl:h-10 rounded-full text-foreground flex items-center justify-center transition-all ml-1",
-                      (chat.query.trim() || rag.uploadedFiles.length > 0 || imageFiles.length > 0)
-                        ? "bg-primary text-primary-foreground shadow-md hover:scale-105 active:scale-95"
-                        : "bg-muted/40 text-muted-foreground/50 pointer-events-none"
-                    )}
-                  >
-                    {chat.isProcessing || rag.isUploading ? (
-                      <RefreshCw className="w-4 h-4 xl:w-5 xl:h-5 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4 xl:w-4 xl:h-4 ml-0.5" />
-                    )}
-                  </Button>
                 </div>
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
 

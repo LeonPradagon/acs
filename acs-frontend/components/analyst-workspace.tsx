@@ -14,36 +14,13 @@ import { WorkspaceHeader } from "@/components/workspace/workspace-header";
  */
 export function AnalystWorkspace() {
   const session = useSession();
-  const [currentTime, setCurrentTime] = useState("");
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date().toLocaleString("id-ID", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      setCurrentTime(now);
-    };
-
-    updateTime();
-    const interval = setInterval(updateTime, 60000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div className="h-screen bg-background overflow-hidden font-sans">
       <AIQueryInput
         className="h-full w-full"
         handleLogout={session.handleLogout}
-        workspaceHeader={
-          <WorkspaceHeader
-            currentTime={currentTime}
-          />
-        }
+        workspaceHeader={<WorkspaceHeader />}
       />
     </div>
   );

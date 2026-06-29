@@ -64,6 +64,17 @@ export const useRAG = () => {
 
       setUploadedFiles((prev) => [...prev, ...validFiles]);
 
+      if (validFiles.length > 0) {
+        // Automatically upload valid files immediately
+        // We use setTimeout to ensure state is slightly settled, or we just pass validFiles
+        // Wait, uploadDocuments is already a function. We can just call it with validFiles.
+        // We need to suppress the exhaustive-deps warning since uploadDocuments depends on states
+        // but we can just use a timeout to call it outside the render cycle if needed.
+        setTimeout(() => {
+          uploadDocuments(validFiles);
+        }, 100);
+      }
+
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -94,8 +105,9 @@ export const useRAG = () => {
     }));
   }, []);
 
-  const uploadDocuments = async (): Promise<boolean> => {
-    if (uploadedFiles.length === 0) {
+  const uploadDocuments = async (files?: File[]): Promise<boolean> => {
+    const filesToUpload = files || uploadedFiles;
+    if (filesToUpload.length === 0) {
       setUploadError("Pilih minimal satu file untuk diupload");
       return false;
     }
@@ -107,7 +119,7 @@ export const useRAG = () => {
 
     try {
       const formData = new FormData();
-      uploadedFiles.forEach((file) => {
+      filesToUpload.forEach((file) => {
         formData.append("files", file);
       });
 
@@ -146,7 +158,7 @@ export const useRAG = () => {
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
         timeoutRef.current = setTimeout(() => {
           setShowUploadModal(false);
-          setUploadedFiles([]);
+          // setUploadedFiles([]); // We preserve the files until user clicks send
           setUploadMetadata({
             category: "general",
             classification: "Internal",
@@ -188,5 +200,6 @@ export const useRAG = () => {
     addTag,
     removeTag,
     uploadDocuments,
+    setUploadedFiles,
   };
 };

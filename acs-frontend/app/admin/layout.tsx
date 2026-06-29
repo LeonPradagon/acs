@@ -62,7 +62,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white shadow-sm">
             <Shield className="w-4 h-4" />
           </div>
-          <span className="font-bold text-sm tracking-tight">Admin Console</span>
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-sm tracking-tight">Admin Console</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 text-[8px] font-bold">
+              {process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0"}
+            </span>
+          </div>
         </div>
         <button
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -98,7 +103,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <Shield className="w-5 h-5" />
             </div>
             <div className="flex flex-col">
-              <span className="font-bold tracking-tight text-foreground text-[15px]">Admin Console</span>
+              <div className="flex items-center gap-2">
+                <span className="font-bold tracking-tight text-foreground text-[15px]">Admin Console</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 text-[8px] font-bold">
+                  {process.env.NEXT_PUBLIC_APP_VERSION || "v1.0.0"}
+                </span>
+              </div>
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mt-0.5">Super Admin</span>
             </div>
           </div>

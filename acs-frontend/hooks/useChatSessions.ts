@@ -22,23 +22,12 @@ export const useChatSessions = () => {
 
   const handleNewSession = useCallback(
     async (setChatHistory: (history: ChatMessage[]) => void) => {
-      try {
-        const newSession = await aiQueryService.createSession();
-        setCurrentSessionId(newSession.id);
-        setChatHistory([
-          {
-            id: "welcome",
-            content: "Sesi obrolan baru dimulai. Ada yang bisa saya bantu hari ini?",
-            role: "assistant",
-            timestamp: new Date(),
-          },
-        ]);
-        await loadSessionsList();
-      } catch (err) {
-        console.error("Failed to create session", err);
-      }
+      // Don't create a backend session yet to avoid spamming the sidebar.
+      // It will be created automatically in useChat when the user sends their first message.
+      setCurrentSessionId(null);
+      setChatHistory([]);
     },
-    [loadSessionsList],
+    [],
   );
 
   const handleSelectSession = useCallback(
