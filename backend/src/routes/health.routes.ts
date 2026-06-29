@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { prisma, esClient } from "../config/db";
 import { redisConnection } from "../config/redis";
+import fs from "fs";
+import path from "path";
 
 const router = Router();
 
@@ -44,6 +46,16 @@ router.get("/", async (req, res) => {
 
   const statusCode = healthStatus.status === "UP" ? 200 : 503;
   return res.status(statusCode).json(healthStatus);
+});
+
+router.get("/version", (req, res) => {
+  try {
+    const pkgPath = path.join(process.cwd(), "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+    return res.status(200).json({ version: pkg.version || "1.0.0" });
+  } catch (err) {
+    return res.status(200).json({ version: "1.0.0" });
+  }
 });
 
 export default router;
