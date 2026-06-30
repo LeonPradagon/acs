@@ -79,6 +79,7 @@ export const useRAG = () => {
         fileInputRef.current.value = "";
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 

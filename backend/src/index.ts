@@ -10,6 +10,7 @@ import documentRoutes from "./routes/document.routes";
 import healthRoutes from "./routes/health.routes";
 import adminRoutes from "./routes/admin.routes";
 import emailRoutes from "./routes/email.routes";
+import userRoutes from "./routes/user.routes";
 import { prisma, esClient, testConnections } from "./config/db";
 import { redisConnection } from "./config/redis";
 import { documentWorker } from "./workers/document.worker";
@@ -119,6 +120,7 @@ app.use("/api/rag", documentRoutes);
 app.use("/api/health", healthRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/email", emailRoutes);
+app.use("/api/users", userRoutes);
 
 // Global Error Handler (must be before 404 to catch thrown errors)
 app.use(errorMiddleware);

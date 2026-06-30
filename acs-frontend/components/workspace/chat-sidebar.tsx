@@ -483,7 +483,10 @@ export function ChatSidebar({
                       Personalization
                     </DropdownMenuItem>
 
-                    <DropdownMenuItem className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
+                    <DropdownMenuItem 
+                      className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors"
+                      onClick={() => window.location.href = "/profile"}
+                    >
                       <div className="w-4 h-4 bg-[#d83545] text-white rounded-full flex items-center justify-center text-[7px] font-bold">
                         {userName ? userName.substring(0, 2).toUpperCase() : "LE"}
                       </div>

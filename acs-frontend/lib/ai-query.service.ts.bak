@@ -187,12 +187,15 @@ export const processQuery = async (
   chatHistory: any[],
   onStreamToken?: (token: string) => void,
   onStep?: (step: string) => void,
-  sessionId?: string,
-  signal?: AbortSignal,
-  files?: any[],
-  model?: string,
-  effortLevel?: string,
-  isThinking?: boolean
+  options: {
+    sessionId?: string;
+    files?: any[];
+    model?: string;
+    effortLevel?: string;
+    isThinking?: boolean;
+    onAttachment?: (att: any) => void;
+  } = {},
+  signal?: AbortSignal
 ): Promise<ChatMessage> => {
   const startTime = Date.now();
 

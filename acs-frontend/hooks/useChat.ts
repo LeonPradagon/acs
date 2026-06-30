@@ -24,6 +24,8 @@ export const useChat = (options: UseChatOptions = {}) => {
   const [selectedModel, setSelectedModel] = useState<string>(
     options.selectedModel || "openai/gpt-oss-120b",
   );
+  const [effortLevel, setEffortLevel] = useState<string>("medium");
+  const [isThinking, setIsThinking] = useState<boolean>(true);
 
   // Compose session management from extracted hook
   const sessionManager = useChatSessions();
@@ -49,20 +51,7 @@ export const useChat = (options: UseChatOptions = {}) => {
   // Stable ref to always access the latest handleProcess
   const handleProcessRef = useRef<typeof handleProcess>(null as any);
 
-  // Handle setting welcome message if no history
-  useEffect(() => {
-    if (chatHistory.length === 0 && !currentSessionId) {
-      setChatHistory([
-        {
-          id: "welcome",
-          content:
-            "Halo! Saya ACS AI Assistant. Saya siap membantu Anda dengan berbagai pertanyaan — mulai dari analisis data, coding, penjelasan konsep, hingga diskusi umum. Silakan ketik pertanyaan Anda! 🚀",
-          role: "assistant",
-          timestamp: new Date(),
-        },
-      ]);
-    }
-  }, [chatHistory.length, currentSessionId]);
+
 
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef.current) {
@@ -189,8 +178,13 @@ export const useChat = (options: UseChatOptions = {}) => {
       "auto",
       {},
       newHistory,
+      lastUserMessage.files,
+      selectedModel,
+      lastUserMessage.images,
+      effortLevel,
+      isThinking
     );
-  }, [chatHistory]);
+  }, [chatHistory, selectedModel, effortLevel, isThinking]);
 
   // --- Edit & Re-submit ---
   const handleEditAndResubmit = useCallback(
@@ -213,9 +207,14 @@ export const useChat = (options: UseChatOptions = {}) => {
         "auto",
         {},
         updatedHistory,
+        undefined,
+        selectedModel,
+        undefined,
+        effortLevel,
+        isThinking
       );
     },
-    [chatHistory],
+    [chatHistory, selectedModel, effortLevel, isThinking],
   );
 
   /**
@@ -231,11 +230,15 @@ export const useChat = (options: UseChatOptions = {}) => {
     files?: any[],
     modelOverride?: string,
     images?: string[],
+    overrideEffort?: string,
+    overrideThinking?: boolean
   ) => {
     if (!userQuery.trim() && !(images && images.length > 0)) return;
     if (isProcessing) return;
 
     const activeModel = modelOverride || selectedModel;
+    const activeEffort = overrideEffort || effortLevel;
+    const activeThinking = overrideThinking !== undefined ? overrideThinking : isThinking;
 
     let activeSessionId = currentSessionId;
 
@@ -311,6 +314,8 @@ export const useChat = (options: UseChatOptions = {}) => {
         controller.signal,
         files,
         activeModel,
+        activeEffort,
+        activeThinking
       );
 
       setChatHistory((prev) => [...prev, result]);
@@ -368,6 +373,10 @@ export const useChat = (options: UseChatOptions = {}) => {
     processingSteps,
     selectedModel,
     setSelectedModel,
+    effortLevel,
+    setEffortLevel,
+    isThinking,
+    setIsThinking,
     messagesEndRef,
     textareaRef,
     clearChat,

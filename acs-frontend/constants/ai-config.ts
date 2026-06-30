@@ -68,18 +68,24 @@ export const AI_PERSONAS = {
 
 export const AVAILABLE_MODELS = {
   "openai/gpt-oss-120b": {
-    name: "GPT",
+    name: "GPT OSS",
     description:
       "Model open source dengan kecepatan tinggi dan reasoning yang excellent",
     icon: Rocket,
     color: "bg-purple-100 text-purple-700 border-purple-200",
   },
-  "meta-llama/llama-4-scout-17b-16e-instruct": {
-    name: "LLaMA Vision",
-    description: "Model canggih dengan kemampuan analisis gambar (Multimodal)",
-    icon: ImageIcon,
-    color: "bg-blue-100 text-blue-700 border-blue-200",
+  "openai/qwen3-coder:480b": {
+    name: "Qwen 3",
+    description: "Model canggih dari Qwen dengan parameter sangat besar (480B) untuk penalaran dan analisis komprehensif",
+    icon: Brain,
+    color: "bg-orange-100 text-orange-700 border-orange-200",
   },
+  // "meta-llama/llama-4-scout-17b-16e-instruct": {
+  //   name: "LLaMA Vision",
+  //   description: "Model canggih dengan kemampuan analisis gambar (Multimodal)",
+  //   icon: ImageIcon,
+  //   color: "bg-blue-100 text-blue-700 border-blue-200",
+  // },
 };
 
 export const CLASSIFICATION_LEVELS = {

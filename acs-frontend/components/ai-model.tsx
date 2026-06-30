@@ -18,12 +18,22 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
+  SelectSeparator,
+  SelectLabel,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+  DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu";
 import {
   Bot,
@@ -44,12 +54,15 @@ import {
   Code,
   Lightbulb,
   ImageIcon,
+  Check,
   Plus,
   X,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Custom Hooks
+import { useRouter, usePathname } from "next/navigation";
 import { useChat } from "@/hooks/useChat";
 import { useRAG } from "@/hooks/useRAG";
 
@@ -163,6 +176,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
 
   const rag = useRAG();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pathname = usePathname();
   const [userName, setUserName] = useState<string>("User");
   const [userRole, setUserRole] = useState<string>("user");
   const [isEmailSettingsOpen, setIsEmailSettingsOpen] = useState(false);
@@ -181,21 +195,52 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
   }, []);
 
   useEffect(() => {
-    try {
-      const userStr = localStorage.getItem("user");
-      if (userStr) {
-        const userObj = JSON.parse(userStr);
-        if (userObj && userObj.name) {
-          setUserName(userObj.name);
+    const loadUserFromStorage = async () => {
+      try {
+        const userStr = localStorage.getItem("user");
+        if (userStr) {
+          const userObj = JSON.parse(userStr);
+          if (userObj && userObj.name) {
+            setUserName(userObj.name);
+          }
+          if (userObj && userObj.role) {
+            setUserRole(userObj.role);
+          }
         }
-        if (userObj && userObj.role) {
-          setUserRole(userObj.role);
+        
+        // Always verify with backend to ensure data is perfectly synced
+        const token = localStorage.getItem("accessToken");
+        if (token) {
+          const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002";
+          const res = await fetch(`${baseUrl}/api/users/profile`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.name) setUserName(data.name);
+            if (data.role) setUserRole(data.role);
+            
+            // Sync localstorage
+            if (userStr) {
+              const userObj = JSON.parse(userStr);
+              userObj.name = data.name;
+              userObj.role = data.role;
+              localStorage.setItem("user", JSON.stringify(userObj));
+            }
+          }
         }
+      } catch (e) {
+        console.error("Failed to load user from storage/API", e);
       }
-    } catch (e) {
-      console.error("Failed to parse user from local storage", e);
-    }
-  }, []);
+    };
+
+    // Load initially
+    loadUserFromStorage();
+
+    // Listen to changes (e.g. from Profile edit in another tab)
+    window.addEventListener("storage", loadUserFromStorage);
+    return () => window.removeEventListener("storage", loadUserFromStorage);
+  }, [pathname]);
 
   useImperativeHandle(ref, () => ({
     setQuery: (newQuery: string) => {
@@ -278,8 +323,8 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
 
     let base64Images: string[] = [];
     if (imageFiles.length > 0) {
-      if (chat.selectedModel !== "meta-llama/llama-4-scout-17b-16e-instruct") {
-        chat.setSelectedModel("meta-llama/llama-4-scout-17b-16e-instruct");
+      if (chat.selectedModel !== "openai/qwen3-coder:480b") {
+        chat.setSelectedModel("openai/qwen3-coder:480b");
       }
 
       base64Images = await Promise.all(
@@ -306,7 +351,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
         undefined,
         currentFiles,
         base64Images.length > 0
-          ? "meta-llama/llama-4-scout-17b-16e-instruct"
+          ? "openai/qwen3-coder:480b"
           : undefined,
         base64Images,
       );
@@ -635,28 +680,106 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                     )}
                   </div>
 
-                  {/* Embedded Model Selector (Right) */}
-                  <div className="absolute right-4 bottom-3 z-10">
-                    <Select
-                      value={chat.selectedModel}
-                      onValueChange={chat.setSelectedModel}
-                      disabled={false}
-                    >
-                      <SelectTrigger className="h-8 w-fit min-w-[90px] border-0 !bg-transparent hover:!bg-transparent text-[11px] hover:opacity-70 font-mono shadow-none rounded-xl transition-all">
-                        <SelectValue placeholder="Model" />
-                      </SelectTrigger>
-                      <SelectContent
-                        align="end"
-                      className="text-[11px] font-mono rounded-xl border-border/50 shadow-xl backdrop-blur-xl"
-                    >
-                      {Object.entries(AVAILABLE_MODELS).map(([id, model]) => (
-                        <SelectItem key={id} value={id}>
-                          {model.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                  {/* Embedded Controls (Right) */}
+                  <div className="absolute right-4 bottom-3 z-10 flex items-center gap-2">
+                    {/* Unified Model & Effort Selector */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="flex items-center gap-1.5 h-8 px-3 rounded-xl border border-border/50 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container)] text-[11px] font-mono shadow-sm transition-all outline-none group">
+                          <span className="truncate max-w-[120px]">
+                            {AVAILABLE_MODELS[chat.selectedModel as keyof typeof AVAILABLE_MODELS]?.name || "Model"}
+                          </span>
+                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-[280px] p-2 rounded-xl border-border/50 shadow-xl backdrop-blur-xl">
+                        
+                        {/* Open Source Models */}
+                        <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          Open Source Models
+                        </div>
+                        {Object.entries(AVAILABLE_MODELS).filter(([id]) => id.includes('oss')).map(([id, model]) => (
+                          <DropdownMenuItem 
+                            key={id} 
+                            onClick={() => chat.setSelectedModel(id)}
+                            className={cn("flex flex-col items-start gap-0.5 py-2 px-2 cursor-pointer rounded-lg", chat.selectedModel === id ? "bg-accent/50" : "")}
+                          >
+                            <div className="flex items-center justify-between w-full">
+                              <span className="font-semibold text-[13px]">{model.name}</span>
+                              {chat.selectedModel === id && <Check className="w-4 h-4 text-blue-500" />}
+                            </div>
+                            <span className="text-[11px] text-muted-foreground line-clamp-1">{model.description}</span>
+                          </DropdownMenuItem>
+                        ))}
+
+                        <DropdownMenuSeparator className="my-1.5" />
+
+                        {/* Cloud Models */}
+                        <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          Cloud Models
+                        </div>
+                        {Object.entries(AVAILABLE_MODELS).filter(([id]) => !id.includes('oss')).map(([id, model]) => (
+                          <DropdownMenuItem 
+                            key={id} 
+                            onClick={() => chat.setSelectedModel(id)}
+                            className={cn("flex flex-col items-start gap-0.5 py-2 px-2 cursor-pointer rounded-lg", chat.selectedModel === id ? "bg-accent/50" : "")}
+                          >
+                            <div className="flex items-center justify-between w-full">
+                              <span className="font-semibold text-[13px]">{model.name}</span>
+                              {chat.selectedModel === id && <Check className="w-4 h-4 text-blue-500" />}
+                            </div>
+                            <span className="text-[11px] text-muted-foreground line-clamp-1">{model.description}</span>
+                          </DropdownMenuItem>
+                        ))}
+
+                        <DropdownMenuSeparator className="my-1.5" />
+
+                        {/* Effort Sub Menu */}
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger className="py-2.5 px-2 rounded-lg cursor-pointer">
+                            <span className="text-[13px] font-medium flex-1">Effort</span>
+                            <span className="text-xs text-muted-foreground capitalize mr-1">{chat.effortLevel}</span>
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuPortal>
+                            <DropdownMenuSubContent className="w-[300px] p-2 rounded-xl border-border/50 shadow-xl backdrop-blur-xl" sideOffset={8}>
+                              <div className="px-2 py-2 mb-1 text-xs text-muted-foreground leading-relaxed">
+                                Higher effort means more thorough responses, but takes longer and uses your limits faster.
+                              </div>
+                              
+                              {["low", "medium", "high", "ultra high"].map((level) => (
+                                <DropdownMenuItem 
+                                  key={level}
+                                  onClick={() => chat.setEffortLevel(level)}
+                                  className="flex items-center justify-between py-2.5 px-2 cursor-pointer rounded-lg"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[13px] capitalize">{level === "ultra high" ? "Max" : level}</span>
+                                    {level === "low" && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 bg-muted text-muted-foreground border-none">Default</Badge>}
+                                  </div>
+                                  {chat.effortLevel === level && <Check className="w-4 h-4 text-blue-500" />}
+                                </DropdownMenuItem>
+                              ))}
+                              
+                              <DropdownMenuSeparator className="my-2" />
+                              
+                              <div className="px-2 py-2">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-[13px] font-medium">Thinking</span>
+                                  <Switch 
+                                    checked={chat.isThinking} 
+                                    onCheckedChange={chat.setIsThinking}
+                                    className="data-[state=checked]:bg-blue-500 scale-[0.8] origin-right"
+                                  />
+                                </div>
+                                <span className="text-xs text-muted-foreground">Can think for more complex tasks</span>
+                              </div>
+                            </DropdownMenuSubContent>
+                          </DropdownMenuPortal>
+                        </DropdownMenuSub>
+
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
               </div>
             </div>
           </div>

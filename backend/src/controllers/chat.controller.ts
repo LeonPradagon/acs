@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { getUniversalResponse, getStreamingResponse } from "../services/groq.service";
+import { getUniversalResponse, getStreamingResponse } from "../services/ollama.service";
 import { AuthRequest } from "../middleware/auth.middleware";
 import { OnyxService } from "../services/onyx.service";
 import { prisma } from "../config/db";
@@ -26,6 +26,8 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
     messages = [],
     sessionId,
     files = [],
+    effortLevel = "medium",
+    isThinking = false,
   } = req.body;
 
   // Set SSE headers
@@ -130,6 +132,30 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
 
     // 2. Build history
     const conversationHistory = buildConversationHistory(messages);
+
+    if (isThinking) {
+      let effortInstruction = "";
+      switch (effortLevel.toLowerCase()) {
+        case "low":
+          effortInstruction = "Keep your thinking process brief and concise. Focus only on the most essential points.";
+          break;
+        case "medium":
+          effortInstruction = "Provide a balanced step-by-step thinking process before answering.";
+          break;
+        case "high":
+          effortInstruction = "Perform a thorough step-by-step analysis. Consider multiple angles and edge cases before answering.";
+          break;
+        case "ultra high":
+          effortInstruction = "Engage in an extremely detailed, exhaustive internal monologue. Break down the problem into fundamental components, evaluate all possible strategies, self-correct if necessary, and synthesize the best possible approach before providing the final answer.";
+          break;
+        default:
+          effortInstruction = "Provide a balanced step-by-step thinking process before answering.";
+      }
+      
+      const thinkingSystemPrompt = `You are required to use a chain-of-thought reasoning process before you output the final answer.\n${effortInstruction}\nIMPORTANT: You MUST enclose your entire reasoning process strictly inside <think> and </think> tags. Do not put any of your final answer inside these tags.\nExample:\n<think>\nFirst I will analyze...\n</think>\nFinal Answer here...`;
+      
+      conversationHistory.unshift({ role: "system", content: thinkingSystemPrompt });
+    }
 
     // Send sources first
     if (!isClientDisconnected) {
@@ -285,6 +311,8 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
     messages = [],
     sessionId,
     files = [],
+    effortLevel = "medium",
+    isThinking = false,
   } = req.body;
 
   try {
@@ -297,6 +325,30 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
     });
 
     const conversationHistory = buildConversationHistory(messages);
+
+    if (isThinking) {
+      let effortInstruction = "";
+      switch (effortLevel.toLowerCase()) {
+        case "low":
+          effortInstruction = "Keep your thinking process brief and concise. Focus only on the most essential points.";
+          break;
+        case "medium":
+          effortInstruction = "Provide a balanced step-by-step thinking process before answering.";
+          break;
+        case "high":
+          effortInstruction = "Perform a thorough step-by-step analysis. Consider multiple angles and edge cases before answering.";
+          break;
+        case "ultra high":
+          effortInstruction = "Engage in an extremely detailed, exhaustive internal monologue. Break down the problem into fundamental components, evaluate all possible strategies, self-correct if necessary, and synthesize the best possible approach before providing the final answer.";
+          break;
+        default:
+          effortInstruction = "Provide a balanced step-by-step thinking process before answering.";
+      }
+      
+      const thinkingSystemPrompt = `You are required to use a chain-of-thought reasoning process before you output the final answer.\n${effortInstruction}\nIMPORTANT: You MUST enclose your entire reasoning process strictly inside <think> and </think> tags. Do not put any of your final answer inside these tags.\nExample:\n<think>\nFirst I will analyze...\n</think>\nFinal Answer here...`;
+      
+      conversationHistory.unshift({ role: "system", content: thinkingSystemPrompt });
+    }
 
     const responseData = await getUniversalResponse(
       question,

@@ -1,5 +1,5 @@
 import { retrieveContext, RagContext } from "./rag.service";
-import { getStreamingResponse, getUniversalResponse } from "./groq.service";
+import { getStreamingResponse, getUniversalResponse } from "./ollama.service";
 import { ChatService } from "./chat.service";
 import { SessionService } from "./session.service";
 import { OnyxService } from "./onyx.service";

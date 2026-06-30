@@ -14,8 +14,9 @@
   "dependencies": {
     "@elastic/elasticsearch": "^8.13.0",
     "@langchain/community": "^1.1.28",
-    "@langchain/core": "^1.1.47",
+    "@langchain/core": "^1.2.1",
     "@langchain/groq": "^1.2.1",
+    "@langchain/openai": "^1.5.3",
     "@prisma/client": "^5.22.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/markdown-it": "^14.1.2",

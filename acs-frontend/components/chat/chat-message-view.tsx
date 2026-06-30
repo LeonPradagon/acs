@@ -11,6 +11,7 @@ import {
   Pencil,
   X,
   FileText,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -429,7 +430,22 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
   const hasOntology = message.ontology_data;
   const hasAttachments = message.attachments && message.attachments.length > 0;
   const queryType = message.enhanced_metadata?.query_type;
-  const displayContent = cleanExportBlocks(message.content);
+  const displayContentRaw = cleanExportBlocks(message.content);
+  
+  let thinkContent = "";
+  let displayContent = displayContentRaw;
+  
+  // Extract completed think blocks
+  const thinkMatch = displayContent.match(/<think>([\s\S]*?)<\/think>/);
+  if (thinkMatch) {
+    thinkContent = thinkMatch[1].trim();
+    displayContent = displayContent.replace(/<think>[\s\S]*?<\/think>/, "").trim();
+  } else if (displayContent.includes("<think>")) {
+    // Extract streaming/incomplete think blocks
+    const parts = displayContent.split("<think>");
+    displayContent = parts[0].trim();
+    thinkContent = parts[1].trim();
+  }
 
   if (hasOntology) {
     return (
@@ -455,6 +471,15 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
     case "text_response":
       return (
         <div className="space-y-6">
+          {thinkContent && (
+            <div className="text-muted-foreground bg-[var(--surface-variant)]/30 border border-border/50 rounded-xl p-4 text-xs font-mono mb-4 animate-in fade-in duration-300">
+              <div className="flex items-center gap-2 mb-2 font-semibold text-blue-500">
+                <Brain className="w-4 h-4" />
+                <span>Thinking Process</span>
+              </div>
+              <MarkdownText text={thinkContent} />
+            </div>
+          )}
           <MarkdownText text={displayContent} />
           {hasAttachments && <AttachmentCards message={message} />}
           <MessageMetadata message={message} />
@@ -464,6 +489,15 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
     default:
       return (
         <div className="space-y-6">
+          {thinkContent && (
+            <div className="text-muted-foreground bg-[var(--surface-variant)]/30 border border-border/50 rounded-xl p-4 text-xs font-mono mb-4 animate-in fade-in duration-300">
+              <div className="flex items-center gap-2 mb-2 font-semibold text-blue-500">
+                <Brain className="w-4 h-4" />
+                <span>Thinking Process</span>
+              </div>
+              <MarkdownText text={thinkContent} />
+            </div>
+          )}
           {hasVisualization && <VisualAnalysisContent message={message} />}
           <MarkdownText text={displayContent} />
           {hasAttachments && <AttachmentCards message={message} />}

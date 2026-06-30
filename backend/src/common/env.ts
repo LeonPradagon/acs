@@ -47,7 +47,7 @@ export const env = {
   REDIS_URL: optionalEnv("REDIS_URL", "redis://localhost:6379"),
 
   // AI Services
-  GROQ_API_KEY: requireEnv("GROQ_API_KEY"),
+  OLLAMA_API_KEY: requireEnv("OLLAMA_API_KEY"),
   LLAMAPARSE_API_KEY: process.env.LLAMAPARSE_API_KEY || "",
   
   // Onyx AI

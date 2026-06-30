@@ -1,5 +1,5 @@
 import { prisma } from "../config/db";
-import { getUniversalResponse } from "./groq.service";
+import { getUniversalResponse } from "./ollama.service";
 
 /**
  * Service for chat-related business logic (title generation, history saving).
