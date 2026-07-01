@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, FileText, Database, ArrowLeft, Shield, Loader2, Menu, X, Brain } from "lucide-react";
+import { Users, FileText, Database, ArrowLeft, Shield, Loader2, Menu, X, Brain, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -42,6 +42,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "System Integrations", href: "/admin/integrations", icon: Database },
     { name: "AI Brain & Context", href: "/admin/ai-brain", icon: Brain },
   ];
+
+  const handleLogout = () => {
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
+    router.replace("/login");
+  };
 
   if (!mounted || !isAuthorized) {
     return (
@@ -91,13 +98,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         isSidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="p-6 pb-2">
-          <Link href="/analyst-workspace" className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors mb-8 group w-fit">
-            <div className="p-1.5 rounded-md bg-muted group-hover:bg-indigo-500/10 group-hover:text-indigo-500 transition-colors">
-              <ArrowLeft className="w-3.5 h-3.5" />
-            </div>
-            Back to Workspace
-          </Link>
-          
           <div className="flex items-center gap-3 mb-8 px-2">
             <div className="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white shrink-0">
               <Shield className="w-5 h-5" />
@@ -136,6 +136,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             );
           })}
         </nav>
+
+        <div className="p-4 mt-auto border-t border-border/60">
+          <button onClick={handleLogout} className="flex items-center gap-3 px-3 py-3 rounded-xl text-[14px] font-medium text-red-500 hover:bg-red-500/10 hover:text-red-600 transition-all duration-200 w-full text-left">
+            <LogOut className="w-[18px] h-[18px]" />
+            Logout
+          </button>
+        </div>
       </aside>
 
       {/* Main Content Area */}

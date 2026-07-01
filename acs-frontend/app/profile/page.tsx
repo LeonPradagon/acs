@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { User, Shield, Key, Mail, Calendar, Edit3, ArrowLeft, Loader2, Save } from "lucide-react";
+import { User, Shield, Key, Mail, Calendar, Edit3, ArrowLeft, Loader2, Save, Activity } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Swal from "sweetalert2";
 
@@ -13,6 +13,12 @@ export default function ProfilePage() {
     role: string;
     clearanceLevel: number;
     createdAt: string;
+    usage?: {
+      fiveHours: number;
+      oneWeek: number;
+      nextResetFiveHours?: string | null;
+      nextResetOneWeek?: string | null;
+    };
   } | null>(null);
   
   const [loading, setLoading] = useState(true);
@@ -56,6 +62,7 @@ export default function ProfilePage() {
           role: data.role === "superadmin" ? "Super Admin" : data.role,
           clearanceLevel: data.clearanceLevel || 1,
           createdAt: data.createdAt,
+          usage: data.usage,
         });
         setEditName(data.name || "Administrator");
         setEditEmail(data.email || "");
@@ -270,8 +277,8 @@ export default function ProfilePage() {
                   </div>
                 </div>
               </div>
-            </div>
-
+          </div>
+          
             {/* Security */}
             <div className="bg-[#1C1C1C] rounded-2xl border border-white/10 overflow-hidden">
               <div className="px-6 py-4 border-b border-white/10 flex items-center gap-2">
@@ -293,6 +300,53 @@ export default function ProfilePage() {
                 </div>
               </div>
             </div>
+
+            {/* Token Usage */}
+            {user.usage && (
+              <div className="bg-[#1C1C1C] rounded-2xl border border-white/10 overflow-hidden">
+                <div className="px-6 py-4 border-b border-white/10 flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-blue-500" />
+                  <h3 className="font-semibold text-lg">Token Usage Overview</h3>
+                </div>
+                <div className="p-6 space-y-6">
+                  {/* 5 Hours */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Past 5 Hours</span>
+                      <span className="font-medium text-white">{user.usage.fiveHours.toLocaleString()} <span className="text-muted-foreground">/ 50,000</span></span>
+                    </div>
+                    <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-500 transition-all duration-500 rounded-full" 
+                        style={{ width: `${Math.min(100, (user.usage.fiveHours / 50000) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground flex justify-between">
+                      <span>{user.usage.nextResetFiveHours ? `Resets at ${new Date(user.usage.nextResetFiveHours).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                      <span>{Math.min(100, (user.usage.fiveHours / 50000) * 100).toFixed(1)}% Used</span>
+                    </div>
+                  </div>
+
+                  {/* 1 Week */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Past 7 Days</span>
+                      <span className="font-medium text-white">{user.usage.oneWeek.toLocaleString()} <span className="text-muted-foreground">/ 500,000</span></span>
+                    </div>
+                    <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-purple-500 transition-all duration-500 rounded-full" 
+                        style={{ width: `${Math.min(100, (user.usage.oneWeek / 500000) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground flex justify-between">
+                      <span>{user.usage.nextResetOneWeek ? `Resets on ${new Date(user.usage.nextResetOneWeek).toLocaleDateString('id-ID', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                      <span>{Math.min(100, (user.usage.oneWeek / 500000) * 100).toFixed(1)}% Used</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
           </div>
         </div>

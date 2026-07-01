@@ -15,6 +15,22 @@ import { ChatService } from "../services/chat.service";
 import { SessionService } from "../services/session.service";
 import { retrieveContext } from "../services/rag.service";
 
+const recordTokenUsage = async (userId: string | undefined, question: string, response: string, model: string) => {
+  if (!userId) return;
+  const estimatedTokens = Math.ceil((question.length + response.length) / 4);
+  try {
+    await prisma.tokenUsage.create({
+      data: {
+        userId,
+        tokens: estimatedTokens,
+        model
+      }
+    });
+  } catch (err) {
+    console.error("[Token Usage] Failed to save:", err);
+  }
+};
+
 // ============================================================
 // Streaming Chat Endpoint (SSE)
 // ============================================================
@@ -106,6 +122,9 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
       if (sessionId) {
         saveAndTitleSession(sessionId, question, fullResponse, files);
       }
+      
+      // Record Token Usage
+      recordTokenUsage(req.user?.userId, question, fullResponse, "onyx");
       return;
     }
     // === End Onyx Integration Branch ===
@@ -133,28 +152,29 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
     // 2. Build history
     const conversationHistory = buildConversationHistory(messages);
 
+    let finalQueryForModel = question;
     if (isThinking) {
       let effortInstruction = "";
       switch (effortLevel.toLowerCase()) {
         case "low":
-          effortInstruction = "Keep your thinking process brief and concise. Focus only on the most essential points.";
+          effortInstruction = "Rely on immediate, intuitive logic. Focus on providing a direct, straightforward reasoning without over-analyzing or exploring alternative edge cases.";
           break;
         case "medium":
-          effortInstruction = "Provide a balanced step-by-step thinking process before answering.";
+          effortInstruction = "Provide standard analytical reasoning. Break down the core components of the problem and verify basic constraints before formulating your answer.";
           break;
         case "high":
-          effortInstruction = "Perform a thorough step-by-step analysis. Consider multiple angles and edge cases before answering.";
+          effortInstruction = "Employ advanced analytical thinking. Methodically deconstruct the problem, explore alternative interpretations, check for subtle edge cases, and validate your logic step-by-step.";
           break;
         case "ultra high":
-          effortInstruction = "Engage in an extremely detailed, exhaustive internal monologue. Break down the problem into fundamental components, evaluate all possible strategies, self-correct if necessary, and synthesize the best possible approach before providing the final answer.";
+          effortInstruction = "Apply the highest level of rigorous, multi-layered cognitive processing. Actively brainstorm multiple hypotheses, heavily critique your own initial assumptions, perform mental simulations of different scenarios, and conduct exhaustive self-correction. Leave no logical stone unturned.";
           break;
         default:
-          effortInstruction = "Provide a balanced step-by-step thinking process before answering.";
+          effortInstruction = "Provide standard analytical reasoning. Break down the core components of the problem and verify basic constraints before formulating your answer.";
       }
       
-      const thinkingSystemPrompt = `You are required to use a chain-of-thought reasoning process before you output the final answer.\n${effortInstruction}\nIMPORTANT: You MUST enclose your entire reasoning process strictly inside <think> and </think> tags. Do not put any of your final answer inside these tags.\nExample:\n<think>\nFirst I will analyze...\n</think>\nFinal Answer here...`;
+      const thinkingSystemPrompt = `\n\n[SYSTEM INSTRUCTION: You are required to use a chain-of-thought reasoning process before you output the final answer.\n${effortInstruction}\nIMPORTANT: You MUST enclose your entire reasoning process strictly inside <think> and </think> tags. Do not put any of your final answer inside these tags.\nExample:\n<think>\nFirst I will analyze...\n</think>\nFinal Answer here...]`;
       
-      conversationHistory.unshift({ role: "system", content: thinkingSystemPrompt });
+      finalQueryForModel = question + thinkingSystemPrompt;
     }
 
     // Send sources first
@@ -184,7 +204,7 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
     const EXPORT_TAG_START = "<EXPORT_DATA>";
 
     await getStreamingResponse(
-      question,
+      finalQueryForModel,
       contexts,
       model,
       conversationHistory,
@@ -274,6 +294,9 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
         if (sessionId) {
           saveAndTitleSession(sessionId, question, fullResponse, files);
         }
+        
+        // Record Token Usage
+        recordTokenUsage(req.user?.userId, question, fullResponse, model);
       },
       abortController.signal
     );
@@ -326,32 +349,33 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
 
     const conversationHistory = buildConversationHistory(messages);
 
+    let finalQueryForModel = question;
     if (isThinking) {
       let effortInstruction = "";
       switch (effortLevel.toLowerCase()) {
         case "low":
-          effortInstruction = "Keep your thinking process brief and concise. Focus only on the most essential points.";
+          effortInstruction = "Rely on immediate, intuitive logic. Focus on providing a direct, straightforward reasoning without over-analyzing or exploring alternative edge cases.";
           break;
         case "medium":
-          effortInstruction = "Provide a balanced step-by-step thinking process before answering.";
+          effortInstruction = "Provide standard analytical reasoning. Break down the core components of the problem and verify basic constraints before formulating your answer.";
           break;
         case "high":
-          effortInstruction = "Perform a thorough step-by-step analysis. Consider multiple angles and edge cases before answering.";
+          effortInstruction = "Employ advanced analytical thinking. Methodically deconstruct the problem, explore alternative interpretations, check for subtle edge cases, and validate your logic step-by-step.";
           break;
         case "ultra high":
-          effortInstruction = "Engage in an extremely detailed, exhaustive internal monologue. Break down the problem into fundamental components, evaluate all possible strategies, self-correct if necessary, and synthesize the best possible approach before providing the final answer.";
+          effortInstruction = "Apply the highest level of rigorous, multi-layered cognitive processing. Actively brainstorm multiple hypotheses, heavily critique your own initial assumptions, perform mental simulations of different scenarios, and conduct exhaustive self-correction. Leave no logical stone unturned.";
           break;
         default:
-          effortInstruction = "Provide a balanced step-by-step thinking process before answering.";
+          effortInstruction = "Provide standard analytical reasoning. Break down the core components of the problem and verify basic constraints before formulating your answer.";
       }
       
-      const thinkingSystemPrompt = `You are required to use a chain-of-thought reasoning process before you output the final answer.\n${effortInstruction}\nIMPORTANT: You MUST enclose your entire reasoning process strictly inside <think> and </think> tags. Do not put any of your final answer inside these tags.\nExample:\n<think>\nFirst I will analyze...\n</think>\nFinal Answer here...`;
+      const thinkingSystemPrompt = `\n\n[SYSTEM INSTRUCTION: You are required to use a chain-of-thought reasoning process before you output the final answer.\n${effortInstruction}\nIMPORTANT: You MUST enclose your entire reasoning process strictly inside <think> and </think> tags. Do not put any of your final answer inside these tags.\nExample:\n<think>\nFirst I will analyze...\n</think>\nFinal Answer here...]`;
       
-      conversationHistory.unshift({ role: "system", content: thinkingSystemPrompt });
+      finalQueryForModel = question + thinkingSystemPrompt;
     }
 
     const responseData = await getUniversalResponse(
-      question,
+      finalQueryForModel,
       contexts,
       model,
       conversationHistory,
@@ -370,6 +394,9 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
           answerContent,
           files,
         );
+        
+        // Record Token Usage
+        recordTokenUsage(req.user?.userId, question, answerContent, model);
       } catch (dbErr) {
         console.warn("[UniversalChat] Failed to save history:", dbErr);
       }

@@ -18,4 +18,4 @@ async function testModel(modelName) {
   }
 }
 
-testModel("qwen3-coder-next").then(() => testModel("qwen3-coder:480b"));
+testModel("qwen3-coder-next").then(() => testModel("gemma4:31b-cloud"));

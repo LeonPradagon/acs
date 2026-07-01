@@ -27,7 +27,37 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json(user);
+    const now = new Date();
+    const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const [fiveHoursUsage, oneWeekUsage, oldestFiveHour, oldestOneWeek] = await Promise.all([
+      prisma.tokenUsage.aggregate({
+        where: { userId, createdAt: { gte: fiveHoursAgo } },
+        _sum: { tokens: true }
+      }),
+      prisma.tokenUsage.aggregate({
+        where: { userId, createdAt: { gte: oneWeekAgo } },
+        _sum: { tokens: true }
+      }),
+      prisma.tokenUsage.findFirst({
+        where: { userId, createdAt: { gte: fiveHoursAgo } },
+        orderBy: { createdAt: 'asc' }
+      }),
+      prisma.tokenUsage.findFirst({
+        where: { userId, createdAt: { gte: oneWeekAgo } },
+        orderBy: { createdAt: 'asc' }
+      })
+    ]);
+
+    const usage = {
+      fiveHours: fiveHoursUsage._sum.tokens || 0,
+      oneWeek: oneWeekUsage._sum.tokens || 0,
+      nextResetFiveHours: oldestFiveHour ? new Date(oldestFiveHour.createdAt.getTime() + 5 * 60 * 60 * 1000) : null,
+      nextResetOneWeek: oldestOneWeek ? new Date(oldestOneWeek.createdAt.getTime() + 7 * 24 * 60 * 60 * 1000) : null,
+    };
+
+    res.json({ ...user, usage });
   } catch (error) {
     console.error("Error fetching profile:", error);
     res.status(500).json({ error: "Internal server error" });

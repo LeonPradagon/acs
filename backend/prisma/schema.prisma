@@ -20,6 +20,7 @@ model User {
   updatedAt       DateTime          @updatedAt
   documents       Document[]
   emailConnection EmailConnection?
+  tokenUsages     TokenUsage[]
 }
 
 model Document {
@@ -50,6 +51,7 @@ model DocumentChunk {
   content    String
   chunkIndex Int
   createdAt  DateTime @default(now())
+  embedding  Unsupported("vector(384)")?
 
   @@index([documentId])
 }
@@ -143,4 +145,15 @@ model ErpSalary {
   allowance      Float       @default(0)
   currency       String      @default("IDR")
   effectiveDate  DateTime
+}
+
+model TokenUsage {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens    Int
+  model     String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }

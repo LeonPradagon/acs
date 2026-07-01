@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import Image from "next/image";
 import {
   Bot,
   User,
@@ -12,6 +13,7 @@ import {
   X,
   FileText,
   Brain,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -154,9 +156,11 @@ export const ChatMessageView = ({
           )}
         >
           {isAssistant ? (
-            <img
+            <Image
               src="/images/Asisgo.png"
               alt="AI"
+              width={40}
+              height={40}
               className="w-full h-full object-contain drop-shadow-sm scale-110"
             />
           ) : (
@@ -243,7 +247,7 @@ export const ChatMessageView = ({
                     Analyzing...
                   </div>
                 ) : (
-                  <MessageContentRouter message={message} />
+                  <MessageContentRouter message={message} isProcessing={isProcessing} />
                 )}
               </div>
             ) : (
@@ -424,7 +428,7 @@ const AttachmentCards = ({ message }: { message: ChatMessage }) => {
 /**
  * Internal component to route different types of assistant content
  */
-const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
+const MessageContentRouter = ({ message, isProcessing }: { message: ChatMessage; isProcessing?: boolean }) => {
   const hasSources = message.sources && message.sources.length > 0;
   const hasVisualization = message.analysis_results || message.visualization;
   const hasOntology = message.ontology_data;
@@ -434,17 +438,20 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
   
   let thinkContent = "";
   let displayContent = displayContentRaw;
+  let isThinkingComplete = false;
   
   // Extract completed think blocks
   const thinkMatch = displayContent.match(/<think>([\s\S]*?)<\/think>/);
   if (thinkMatch) {
     thinkContent = thinkMatch[1].trim();
     displayContent = displayContent.replace(/<think>[\s\S]*?<\/think>/, "").trim();
+    isThinkingComplete = true;
   } else if (displayContent.includes("<think>")) {
     // Extract streaming/incomplete think blocks
     const parts = displayContent.split("<think>");
     displayContent = parts[0].trim();
     thinkContent = parts[1].trim();
+    isThinkingComplete = false;
   }
 
   if (hasOntology) {
@@ -480,7 +487,15 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
               <MarkdownText text={thinkContent} />
             </div>
           )}
-          <MarkdownText text={displayContent} />
+          
+          {isProcessing && (isThinkingComplete || !thinkContent) ? (
+            <div className="flex items-center gap-2 font-semibold text-primary animate-pulse py-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Menyusun jawaban...</span>
+            </div>
+          ) : (
+            displayContent && !isProcessing && <MarkdownText text={displayContent} />
+          )}
           {hasAttachments && <AttachmentCards message={message} />}
           <MessageMetadata message={message} />
           {hasSources && <SourceList sources={message.sources!} />}
@@ -499,7 +514,15 @@ const MessageContentRouter = ({ message }: { message: ChatMessage }) => {
             </div>
           )}
           {hasVisualization && <VisualAnalysisContent message={message} />}
-          <MarkdownText text={displayContent} />
+          
+          {isProcessing && (isThinkingComplete || !thinkContent) ? (
+            <div className="flex items-center gap-2 font-semibold text-primary animate-pulse py-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Menyusun jawaban...</span>
+            </div>
+          ) : (
+            displayContent && !isProcessing && <MarkdownText text={displayContent} />
+          )}
           {hasAttachments && <AttachmentCards message={message} />}
           <MessageMetadata message={message} />
           {hasSources && <SourceList sources={message.sources!} />}
