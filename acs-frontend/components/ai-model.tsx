@@ -12,6 +12,7 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Virtuoso } from "react-virtuoso";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -59,8 +60,10 @@ import {
   Plus,
   X,
   ChevronDown,
+  File,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 // Custom Hooks
 import { useRouter, usePathname } from "next/navigation";
@@ -186,6 +189,7 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [previewFile, setPreviewFile] = useState<{ url: string; name: string } | null>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -311,13 +315,13 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
       }));
 
       if (!rag.isUploading) {
-        // Wait, if it wasn't uploaded (e.g. failed), try again
-        // But normally it's already uploaded. We just call it without files to catch any unuploaded ones.
-        // Actually, since it auto-uploads, we can just clear the UI.
-        
-        // Minor sync delay to ensure the backend DB commit/ES refresh is complete
-        // before the first query attempts retrieval.
-        await new Promise((resolve) => setTimeout(resolve, 1200));
+        // Explicitly upload files that were just queued
+        const success = await rag.uploadDocuments();
+        if (success) {
+          // Minor sync delay to ensure the backend DB commit/ES refresh is complete
+          // before the first query attempts retrieval.
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+        }
       }
 
       // Clear the RAG files from the UI after sending
@@ -403,9 +407,13 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
           {/* Chat History */}
           <div className="flex-1 overflow-hidden relative">
             {!showWelcome && (
-              <ScrollArea className="h-full">
-                <div className="py-10 space-y-2">
-                  {chat.chatHistory.map((message, index) => (
+              <Virtuoso
+                className="h-full w-full custom-scrollbar"
+                data={chat.chatHistory}
+                initialTopMostItemIndex={Math.max(0, chat.chatHistory.length - 1)}
+                followOutput="smooth"
+                itemContent={(index, message) => (
+                  <div className="py-2">
                     <ChatMessageView
                       key={message.id}
                       message={message}
@@ -434,65 +442,68 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                           : undefined
                       }
                     />
-                  ))}
+                  </div>
+                )}
+                components={{
+                  Footer: () => (
+                    <div className="pb-10">
+                      {/* Streaming Live */}
+                      {chat.isProcessing && chat.streamingContent && (
+                        <ChatMessageView
+                          key="streaming"
+                          message={{
+                            id: "streaming",
+                            content: chat.streamingContent,
+                            role: "assistant",
+                            timestamp: new Date(),
+                          }}
+                          isProcessing={chat.isProcessing}
+                        />
+                      )}
 
-                  {/* Streaming Live */}
-                  {chat.isProcessing && chat.streamingContent && (
-                    <ChatMessageView
-                      key="streaming"
-                      message={{
-                        id: "streaming",
-                        content: chat.streamingContent,
-                        role: "assistant",
-                        timestamp: new Date(),
-                      }}
-                      isProcessing={chat.isProcessing}
-                    />
-                  )}
+                      {/* Thinking Indicator */}
+                      {chat.isProcessing && !chat.streamingContent && (
+                        <div className="flex flex-col w-full max-w-3xl mx-auto px-1 animate-in fade-in duration-500">
+                          <div className="flex items-center gap-3 text-primary/60 mb-2">
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span className="text-[10px] font-bold uppercase tracking-widest">
+                              {chat.streamingContent ? "Streaming..." : "Thinking..."}
+                            </span>
+                          </div>
 
-                  {/* Thinking Indicator */}
-                  {chat.isProcessing && !chat.streamingContent && (
-                    <div className="flex flex-col w-full max-w-3xl mx-auto px-1 animate-in fade-in duration-500">
-                      <div className="flex items-center gap-3 text-primary/60 mb-2">
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span className="text-[10px] font-bold uppercase tracking-widest">
-                          {chat.streamingContent
-                            ? "Streaming..."
-                            : "Thinking..."}
-                        </span>
-                      </div>
-
-                      {/* Processing Steps */}
-                      {chat.processingSteps.length > 0 && (
-                        <div className="ml-6 space-y-1.5 border-l border-primary/10 pl-4 py-1">
-                          {chat.processingSteps.map((step, idx) => (
-                            <div
-                              key={idx}
-                              className={cn(
-                                "text-[11px] flex items-center gap-2",
-                                idx === chat.processingSteps.length - 1
-                                  ? "text-primary font-medium animate-pulse"
-                                  : "text-muted-foreground/60",
-                              )}
-                            >
-                              <div
-                                className={cn(
-                                  "w-1 h-1 rounded-full",
-                                  idx === chat.processingSteps.length - 1
-                                    ? "bg-primary"
-                                    : "bg-muted-foreground/30",
-                                )}
-                              />
-                              {step}
+                          {/* Processing Steps */}
+                          {chat.processingSteps.length > 0 && (
+                            <div className="ml-6 space-y-1.5 border-l border-primary/10 pl-4 py-1">
+                              {chat.processingSteps.map((step, idx) => (
+                                <div
+                                  key={idx}
+                                  className={cn(
+                                    "text-[11px] flex items-center gap-2",
+                                    idx === chat.processingSteps.length - 1
+                                      ? "text-primary font-medium animate-pulse"
+                                      : "text-muted-foreground/60",
+                                  )}
+                                >
+                                  <div
+                                    className={cn(
+                                      "w-1 h-1 rounded-full",
+                                      idx === chat.processingSteps.length - 1
+                                        ? "bg-primary"
+                                        : "bg-muted-foreground/30",
+                                    )}
+                                  />
+                                  {step}
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          )}
                         </div>
                       )}
+                      <div ref={chat.messagesEndRef} className="h-40" />
                     </div>
-                  )}
-                  <div ref={chat.messagesEndRef} className="h-40" />
-                </div>
-              </ScrollArea>
+                  )
+                }}
+              />
             )}
           </div>
 
@@ -576,14 +587,21 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                       {rag.uploadedFiles.map((file, idx) => (
                         <div
                           key={`${file.name}-${idx}`}
-                          className="relative flex items-center gap-2 bg-muted/50 border border-border/50 rounded-xl pl-2.5 pr-4 py-1.5 text-sm group"
+                          className="relative flex items-center gap-2 bg-muted/50 hover:bg-muted/80 cursor-pointer border border-border/50 rounded-xl pl-2.5 pr-4 py-1.5 text-sm group transition-colors"
+                          onClick={() => {
+                            const url = URL.createObjectURL(file);
+                            setPreviewFile({ url, name: file.name });
+                          }}
                         >
                           <FileText className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                           <span className="max-w-[120px] truncate text-[11px] font-medium">
                             {file.name}
                           </span>
                           <button
-                            onClick={() => rag.removeFile(idx)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              rag.removeFile(idx);
+                            }}
                             className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-background border border-border/80 rounded-full text-muted-foreground hover:bg-destructive hover:text-white hover:border-destructive transition-all shadow-sm z-10"
                             title="Hapus file"
                           >
@@ -777,6 +795,20 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
                                 </div>
                                 <span className="text-xs text-muted-foreground">Can think for more complex tasks</span>
                               </div>
+                              
+                              <DropdownMenuSeparator className="my-1" />
+                              
+                              <div className="px-2 py-2">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-[13px] font-medium">Web Search</span>
+                                  <Switch 
+                                    checked={chat.isWebSearchEnabled} 
+                                    onCheckedChange={chat.setIsWebSearchEnabled}
+                                    className="data-[state=checked]:bg-blue-500 scale-[0.8] origin-right"
+                                  />
+                                </div>
+                                <span className="text-xs text-muted-foreground">Search internet for current events</span>
+                              </div>
                             </DropdownMenuSubContent>
                           </DropdownMenuPortal>
                         </DropdownMenuSub>
@@ -795,6 +827,29 @@ export const AIQueryInput = forwardRef<any, AIQueryInputProps>((props, ref) => {
         open={isEmailSettingsOpen}
         onOpenChange={setIsEmailSettingsOpen}
       />
+
+      {/* File Preview Modal */}
+      <Dialog open={!!previewFile} onOpenChange={(open) => {
+        if (!open) {
+          if (previewFile?.url) URL.revokeObjectURL(previewFile.url);
+          setPreviewFile(null);
+        }
+      }}>
+        <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0 overflow-hidden bg-white/5 border-white/10 shadow-2xl backdrop-blur-xl">
+          <DialogTitle className="sr-only">
+            Pratinjau dokumen {previewFile?.name}
+          </DialogTitle>
+          <div className="flex-1 overflow-hidden relative rounded-lg">
+            {previewFile && (
+              <iframe 
+                src={`${previewFile.url}${previewFile.name.toLowerCase().endsWith(".pdf") ? "#toolbar=0&navpanes=0&scrollbar=0" : ""}`} 
+                className="w-full h-full border-none bg-white"
+                title={`Preview of ${previewFile.name}`}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 });

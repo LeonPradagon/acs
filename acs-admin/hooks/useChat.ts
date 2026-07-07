@@ -315,7 +315,8 @@ export const useChat = (options: UseChatOptions = {}) => {
         files,
         activeModel,
         activeEffort,
-        activeThinking
+        activeThinking,
+        images
       );
 
       setChatHistory((prev) => [...prev, result]);

@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { prisma } from "../config/db";
 import { documentQueue } from "../config/queue";
-
+import { clearRagCache } from "../services/rag.service";
 /**
  * Handle multiple document uploads with PostgreSQL storage and BullMQ queueing.
  * Defers PDF text extraction and Semantic Search (Vector) indexing to background workers.
@@ -84,6 +84,9 @@ export const uploadDocuments = async (req: Request, res: Response) => {
 
       savedDocuments.push(doc);
     }
+
+    // Invalidate RAG Cache
+    clearRagCache().catch(err => console.error("Failed to clear RAG cache:", err));
 
     return res.status(202).json({
       success: true,

@@ -70,6 +70,12 @@ export interface Source {
     classification?: string;
     date?: string;
     author?: string;
+    pageNumber?: number;
+    heading?: string;
+    sectionPath?: string;
+    highlight?: string;
+    url?: string;
+    type?: "document" | "web" | "knowledge_graph" | string;
   };
   score: number;
   type?: string;
@@ -215,7 +221,7 @@ export interface ChatMessage {
   entities?: Entity[];
   visualization?: VisualizationData;
   modelUsed?: string;
-  confidence?: number;
+  confidence?: any; // ConfidenceBreakdown
   processingTime?: number;
   enhanced_metadata?: any;
   recommendations?: any[];
@@ -226,8 +232,13 @@ export interface ChatMessage {
   ontology_data?: OntologyResponse;
   files?: ChatFile[];
   images?: string[];
-  processingSteps?: string[];
+  processingSteps?: string[]; // (legacy)
   attachments?: { format: string; filename: string; payload: string }[];
+  
+  // Phase 5: Agentic UI fields
+  agentSteps?: { agent: string; action: string; status: "pending" | "done" | "error" }[];
+  pendingAction?: { id: string; type: string; summary: string; status: "PENDING" | "APPROVED" | "REJECTED" };
+  usedMemory?: boolean;
 }
 
 export interface AdvancedVisualResponse {

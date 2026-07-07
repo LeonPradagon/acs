@@ -21,6 +21,7 @@ import {
   renameSessionSchema,
   submitFeedbackSchema,
 } from "../validation/chat.validation";
+import { idempotencyMiddleware } from "../middleware/api-version.middleware";
 
 const router = Router();
 
@@ -45,6 +46,7 @@ router.post(
   "/universal",
   authenticateToken,
   validate(universalChatSchema),
+  idempotencyMiddleware,
   universalChat,
 );
 router.post(

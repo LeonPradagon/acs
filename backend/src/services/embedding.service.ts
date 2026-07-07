@@ -139,24 +139,32 @@ export class EmbeddingService {
     text: string,
     maxChunkSize: number = 1500,
     overlap: number = 300,
-  ): string[] {
-    if (text.length <= maxChunkSize) return [text];
+  ): Array<{ content: string; heading: string | null }> {
+    if (text.length <= maxChunkSize) return [{ content: text, heading: null }];
 
     // Split by double newlines (paragraphs) or markdown headers
     const sections = text.split(/\n\n+|\n(?=#{1,6}\s)/);
-    const chunks: string[] = [];
+    const chunks: Array<{ content: string; heading: string | null }> = [];
+    
     let buffer = "";
+    let currentHeading: string | null = null;
 
     for (const section of sections) {
       const trimmedSection = section.trim();
       if (!trimmedSection) continue;
+      
+      // Update heading if this section starts with a markdown header
+      const headerMatch = trimmedSection.match(/^(#{1,6})\s+(.*)/);
+      if (headerMatch) {
+        currentHeading = headerMatch[2].substring(0, 100); // cap length
+      }
 
       // If adding this section would exceed the limit, flush the buffer
       if (
         buffer.length > 0 &&
         buffer.length + trimmedSection.length + 2 > maxChunkSize
       ) {
-        chunks.push(buffer.trim());
+        chunks.push({ content: buffer.trim(), heading: currentHeading });
 
         // Keep overlap from end of previous chunk
         if (overlap > 0 && buffer.length > overlap) {
@@ -173,7 +181,7 @@ export class EmbeddingService {
         const subChunks = this.chunkText(buffer, maxChunkSize, overlap);
         // Push all but the last sub-chunk
         for (let i = 0; i < subChunks.length - 1; i++) {
-          chunks.push(subChunks[i]);
+          chunks.push({ content: subChunks[i], heading: currentHeading });
         }
         // Keep the last sub-chunk in the buffer for potential merging
         buffer = subChunks[subChunks.length - 1];
@@ -182,7 +190,7 @@ export class EmbeddingService {
 
     // Flush remaining buffer
     if (buffer.trim()) {
-      chunks.push(buffer.trim());
+      chunks.push({ content: buffer.trim(), heading: currentHeading });
     }
 
     return chunks;

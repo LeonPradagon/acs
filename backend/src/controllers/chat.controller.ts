@@ -3,6 +3,7 @@ import { getUniversalResponse, getStreamingResponse } from "../services/ollama.s
 import { AuthRequest } from "../middleware/auth.middleware";
 import { OnyxService } from "../services/onyx.service";
 import { prisma } from "../config/db";
+import { encodingForModel, TiktokenModel } from "js-tiktoken";
 import {
   shouldSkipRAG,
   buildConversationHistory,
@@ -14,15 +15,38 @@ import {
 import { ChatService } from "../services/chat.service";
 import { SessionService } from "../services/session.service";
 import { retrieveContext } from "../services/rag.service";
+import { EvaluationService } from "../services/evaluation.service";
+import { SemanticCacheService } from "../services/semantic-cache.service";
+import { MemoryService } from "../services/memory.service";
+import { GuardrailsService } from "../services/guardrails.service";
 
 const recordTokenUsage = async (userId: string | undefined, question: string, response: string, model: string) => {
   if (!userId) return;
-  const estimatedTokens = Math.ceil((question.length + response.length) / 4);
+
+  let promptTokens = 0;
+  let completionTokens = 0;
+
+  try {
+    // Gunakan gpt-4 tokenizer sebagai pendekatan standar karena Ollama Llama 3 / Mistral 
+    // memiliki rasio tokenizer yang mirip dengan cl100k_base.
+    const enc = encodingForModel("gpt-4");
+    promptTokens = enc.encode(question).length;
+    completionTokens = enc.encode(response).length;
+  } catch (e) {
+    // Fallback heuristic jika enc.encode gagal
+    promptTokens = Math.ceil(question.length / 4);
+    completionTokens = Math.ceil(response.length / 4);
+  }
+
+  const estimatedTokens = promptTokens + completionTokens;
+
   try {
     await prisma.tokenUsage.create({
       data: {
         userId,
         tokens: estimatedTokens,
+        promptTokens,
+        completionTokens,
         model
       }
     });
@@ -35,16 +59,36 @@ const recordTokenUsage = async (userId: string | undefined, question: string, re
 // Streaming Chat Endpoint (SSE)
 // ============================================================
 
-export const streamChat = async (req: AuthRequest, res: Response) => {
-  const {
-    question,
-    model = "openai/gpt-oss-120b",
-    messages = [],
-    sessionId,
-    files = [],
-    effortLevel = "medium",
-    isThinking = false,
-  } = req.body;
+export const streamChat = async (req: AuthRequest, res: Response): Promise<void> => {
+    const { 
+      question, 
+      sessionId, 
+      model = "openai/gpt-oss-120b", 
+      effortLevel = "medium",
+      files = [],
+      messages = [],
+      isThinking = false,
+      isWebSearchEnabled = true,
+      images = []
+    } = req.body;
+
+    if (!question) {
+      res.status(400).json({ message: "Question is required." });
+      return;
+    }
+
+
+    // 1. Input Guardrails
+    const inputGuard = GuardrailsService.validateInput(question);
+    if (!inputGuard.isValid) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.write(`data: ${JSON.stringify({ chunk: inputGuard.reason })}\n\n`);
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+      return;
+    }
 
   // Set SSE headers
   res.setHeader("Content-Type", "text/event-stream");
@@ -120,14 +164,46 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
 
       // Save to database + auto-title (fire and forget)
       if (sessionId) {
-        saveAndTitleSession(sessionId, question, fullResponse, files);
+        saveAndTitleSession(sessionId, question, fullResponse, files, images);
       }
       
       // Record Token Usage
       recordTokenUsage(req.user?.userId, question, fullResponse, "onyx");
+
+      // Async AI Memory Extraction & Summarization
+      if (sessionId) {
+        MemoryService.extractAndStoreEntities(req.user?.userId, question + "\n" + fullResponse);
+        const history = buildConversationHistory(messages);
+        if (history.length > 0 && history.length % 10 === 0) {
+          MemoryService.summarizeConversation(sessionId);
+        }
+      }
+
       return;
     }
     // === End Onyx Integration Branch ===
+
+    // 0. Semantic Cache Check
+    const cachedResponse = await SemanticCacheService.checkCache(question, req.user?.userId);
+    if (cachedResponse) {
+      if (!isClientDisconnected) {
+        res.write(`data: ${JSON.stringify({ type: "step", step: "⚡ Mengambil dari Semantic Cache..." })}\n\n`);
+        
+        // Stream the cached response quickly
+        const chunks = cachedResponse.split(" ");
+        for (let i = 0; i < chunks.length; i++) {
+          if (isClientDisconnected) break;
+          res.write(`data: ${JSON.stringify({ type: "token", token: chunks[i] + " " })}\n\n`);
+          await new Promise(r => setTimeout(r, 10)); // tiny delay for effect
+        }
+        
+        res.write(`data: ${JSON.stringify({ type: "step", step: "✅ Selesai (Cached)" })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "done", model: "Semantic Cache" })}\n\n`);
+        clearInterval(heartbeatInterval);
+        res.end();
+      }
+      return;
+    }
 
     // 1. Query Classification — skip RAG for general knowledge
     if (!isClientDisconnected) {
@@ -136,12 +212,16 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
       );
     }
 
+    // 2. Build history
+    const conversationHistory = buildConversationHistory(messages);
+
     const contexts = await getRAGContext(question, {
       userId: req.user?.userId,
       divisionId: req.user?.divisionId,
       role: req.user?.role,
       clearanceLevel: req.user?.clearanceLevel,
-    });
+      isWebSearchEnabled: isWebSearchEnabled
+    }, conversationHistory);
 
     if (contexts.length > 0 && !isClientDisconnected) {
       res.write(
@@ -149,10 +229,17 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    // 2. Build history
-    const conversationHistory = buildConversationHistory(messages);
+    // 3. Get AI Memory (Summaries & Entities)
+    let memoryContext = "";
+    if (sessionId) {
+      memoryContext = await MemoryService.getLongTermMemoryContext(sessionId, req.user?.userId);
+    }
 
     let finalQueryForModel = question;
+    if (memoryContext) {
+      finalQueryForModel = `[LONG-TERM MEMORY]\n${memoryContext}\n\n[USER QUERY]\n${question}`;
+    }
+
     if (isThinking) {
       let effortInstruction = "";
       switch (effortLevel.toLowerCase()) {
@@ -282,23 +369,51 @@ export const streamChat = async (req: AuthRequest, res: Response) => {
             }
           }
 
+          const { ConfidenceService } = require("../services/confidence.service");
+          const confidence = ConfidenceService.calculate({
+            retrievalScore: contexts.length > 0 ? Math.max(...contexts.map((c: any) => c.score || 0)) : 0.5,
+            toolSuccessRate: 1.0, // Assuming no tools failed in this flow for now
+            contextCoverage: contexts.length > 0 ? 0.8 : 0.2
+          });
+
           res.write(
             `data: ${JSON.stringify({ type: "step", step: "✅ Selesai" })}\n\n`,
           );
-          res.write(`data: ${JSON.stringify({ type: "done", model })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "done", model, confidence })}\n\n`);
           clearInterval(heartbeatInterval);
           res.end();
         }
 
         // Save to database + auto-title (fire and forget)
         if (sessionId) {
-          saveAndTitleSession(sessionId, question, fullResponse, files);
+          saveAndTitleSession(sessionId, question, fullResponse, files, images);
         }
         
         // Record Token Usage
         recordTokenUsage(req.user?.userId, question, fullResponse, model);
+
+        // Run Async AI Evaluation
+        EvaluationService.evaluateResponseAsync(
+          sessionId,
+          question,
+          fullResponse,
+          contexts,
+          model
+        );
+
+        // Async AI Memory Extraction & Summarization
+        MemoryService.extractAndStoreEntities(req.user?.userId, question + "\n" + fullResponse);
+        if (messages.length > 0 && messages.length % 10 === 0) {
+          MemoryService.summarizeConversation(sessionId);
+        }
+
+        // Save to Semantic Cache
+        if (!shouldSkipRAG(question)) {
+          SemanticCacheService.setCache(question, fullResponse, req.user?.userId);
+        }
       },
-      abortController.signal
+      abortController.signal,
+      images
     );
   } catch (error: any) {
     if (error.name === "AbortError" || isClientDisconnected) {
@@ -336,20 +451,38 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
     files = [],
     effortLevel = "medium",
     isThinking = false,
+    images = [],
   } = req.body;
 
   try {
-    // Query Classification
+    // 1. Input Guardrails
+    const inputGuard = GuardrailsService.validateInput(question);
+    if (!inputGuard.isValid) {
+      res.status(403).json({ isJson: false, data: inputGuard.reason });
+      return;
+    }
+
+    const conversationHistory = buildConversationHistory(messages);
+
+    // Query Classification & Multi-Query Retrieval
     const contexts = await getRAGContext(question, {
       userId: req.user?.userId,
       divisionId: req.user?.divisionId,
       role: req.user?.role,
       clearanceLevel: req.user?.clearanceLevel,
-    });
+    }, conversationHistory);
 
-    const conversationHistory = buildConversationHistory(messages);
+    // Get AI Memory
+    let memoryContext = "";
+    if (sessionId) {
+      memoryContext = await MemoryService.getLongTermMemoryContext(sessionId, req.user?.userId);
+    }
 
     let finalQueryForModel = question;
+    if (memoryContext) {
+      finalQueryForModel = `[LONG-TERM MEMORY]\n${memoryContext}\n\n[USER QUERY]\n${question}`;
+    }
+
     if (isThinking) {
       let effortInstruction = "";
       switch (effortLevel.toLowerCase()) {
@@ -380,19 +513,30 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
       model,
       conversationHistory,
       req.user?.divisionId || null,
+      images
     );
+
+    // Output Guardrails (PII Masking & Content Blocking)
+    let answerContent = typeof responseData.data === "string"
+            ? responseData.data
+            : JSON.stringify(responseData.data);
+            
+    const outputGuard = GuardrailsService.validateAndSanitizeOutput(answerContent);
+    answerContent = outputGuard.sanitizedText;
+
+    // Update response data with sanitized text
+    if (typeof responseData.data === "string") {
+      responseData.data = answerContent;
+    }
 
     if (sessionId) {
       try {
-        const answerContent =
-          typeof responseData.data === "string"
-            ? responseData.data
-            : JSON.stringify(responseData.data);
         await ChatService.saveMessages(
           sessionId,
           question,
           answerContent,
           files,
+          images
         );
         
         // Record Token Usage
@@ -402,6 +546,27 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    // Run Async AI Evaluation (fire and forget)
+    EvaluationService.evaluateResponseAsync(
+      sessionId,
+      question,
+      answerContent,
+      contexts,
+      model
+    );
+
+    // Async AI Memory Extraction & Summarization
+    if (sessionId) {
+      MemoryService.extractAndStoreEntities(req.user?.userId, question + "\n" + answerContent);
+      if (conversationHistory.length > 0 && conversationHistory.length % 10 === 0) {
+        MemoryService.summarizeConversation(sessionId);
+      }
+    }
+
+    // Save to Semantic Cache
+    if (!shouldSkipRAG(question)) {
+      SemanticCacheService.setCache(question, answerContent, req.user?.userId);
+    }
     // Calculate real confidence based on RAG results
     const avgScore =
       contexts.length > 0

@@ -4,6 +4,12 @@ import { ChatService } from "./chat.service";
 import { SessionService } from "./session.service";
 import { OnyxService } from "./onyx.service";
 import { prisma } from "../config/db";
+import { QueryRewriterService } from "./query-rewriter.service";
+import { RerankerService } from "./reranker.service";
+import { ContextCompressorService } from "./context-compressor.service";
+import { KnowledgeGraphService } from "./knowledge-graph.service";
+import { PlannerAgent } from "../agents/planner.agent";
+import { WebSearchAgent } from "../agents/web-search.agent";
 
 // ============================================================
 // Query Classification Logic
@@ -117,16 +123,95 @@ export interface UserContext {
   divisionId?: string | null;
   role?: string;
   clearanceLevel?: number;
+  isWebSearchEnabled?: boolean;
 }
 
 export async function getRAGContext(
   question: string,
   user: UserContext,
+  conversationHistory: any[] = []
 ): Promise<RagContext[]> {
   if (shouldSkipRAG(question)) {
     return [];
   }
-  return retrieveContext(question, user.userId, user.divisionId, user.role, user.clearanceLevel);
+
+  // 1. Use Planner to determine what to retrieve
+  // We can run Planner in parallel with query rewriting to save time
+  const historyString = conversationHistory.map((m: any) => `${m.role}: ${m.content}`).join("\n");
+  
+  const [multiQueries, plan] = await Promise.all([
+    QueryRewriterService.generateMultiQueries(question, historyString),
+    user.isWebSearchEnabled ? PlannerAgent.plan({ query: question, userId: user.userId || "anonymous", role: user.role || "user", clearanceLevel: user.clearanceLevel || 0, conversationHistory: conversationHistory }) : Promise.resolve(null)
+  ]);
+
+  const needsWebSearch = plan ? plan.steps.some((s: any) => s.agent === "web_search") : false;
+  if (needsWebSearch) {
+    console.log("[ChatStreamService] Planner decided Web Search is needed.");
+  }
+
+  // 2. Execute RAG Retrieval in Parallel
+  const [parallelResults, graphContext, webResults] = await Promise.all([
+    Promise.all(
+      multiQueries.map(q => retrieveContext(q, user.userId, user.divisionId, user.role, user.clearanceLevel))
+    ),
+    KnowledgeGraphService.retrieveGraphContext(question),
+    needsWebSearch ? WebSearchAgent.execute({ query: question, userId: user.userId || "anonymous", role: user.role || "user", clearanceLevel: user.clearanceLevel || 0, conversationHistory: conversationHistory }) : Promise.resolve(null)
+  ]);
+
+  let allResults = parallelResults.flat();
+  if (graphContext) {
+    allResults.push({
+      content: "[KNOWLEDGE GRAPH CONTEXT]\n" + graphContext,
+      score: 1.0,
+      source: "Knowledge Graph"
+    });
+  }
+  
+  if (webResults && webResults.data && webResults.data.length > 0) {
+    // Map web search results to RagContext format
+    webResults.data.forEach((w: any) => {
+      allResults.push({
+        content: w.content,
+        score: w.score,
+        source: w.metadata.source,
+        metadata: w.metadata
+      });
+    });
+  }
+
+  // 3. Merge and Deduplicate Results (Union)
+  const mergedContexts = new Map<string, RagContext>();
+  allResults.forEach(ctx => {
+    // Deduplicate by source (or a combination of source and content snippet if needed)
+    // For now, we'll use a combination of source and first 50 chars of content as key
+    const dedupKey = `${ctx.source}_${ctx.content.substring(0, 50)}`;
+    if (!mergedContexts.has(dedupKey)) {
+      mergedContexts.set(dedupKey, ctx);
+    } else {
+      // If duplicate found, keep the one with the higher score
+      const existing = mergedContexts.get(dedupKey)!;
+      if ((ctx.score || 0) > (existing.score || 0)) {
+        mergedContexts.set(dedupKey, ctx);
+      }
+    }
+  });
+
+  // Sort by initial retrieval score descending (top 20 for reranking)
+  let candidateContexts = Array.from(mergedContexts.values())
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, 20);
+
+  // 4. Cross-Encoder Reranking
+  if (candidateContexts.length > 0) {
+    candidateContexts = await RerankerService.rerank(question, candidateContexts, 10);
+  }
+
+  // 5. Context Compression
+  if (candidateContexts.length > 0) {
+    candidateContexts = await ContextCompressorService.compressContexts(question, candidateContexts);
+  }
+
+  return candidateContexts;
 }
 
 // ============================================================
@@ -137,10 +222,11 @@ export async function saveAndTitleSession(
   question: string,
   response: string,
   files?: any[],
+  images?: string[],
 ): Promise<void> {
   try {
     const cleanResponse = cleanExportTags(response);
-    await ChatService.saveMessages(sessionId, question, cleanResponse, files);
+    await ChatService.saveMessages(sessionId, question, cleanResponse, files, images);
 
     const aiTitle = await ChatService.generateSessionTitle(question, cleanResponse);
     await SessionService.updateTitleIfDefault(sessionId, aiTitle);

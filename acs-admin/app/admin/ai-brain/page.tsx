@@ -19,6 +19,7 @@ import {
   Clock,
   BarChart3,
 } from "lucide-react";
+import { useAdmin } from "@/hooks/useAdmin";
 import apiClient from "@/lib/api-client";
 import { motion } from "framer-motion";
 import {
@@ -267,10 +268,14 @@ export default function AIBrainPage() {
     }
   };
 
+  const adminInfo = useAdmin();
+
   useEffect(() => {
     fetchStatus();
+    adminInfo.fetchKnowledgeGraph();
     const intervalId = setInterval(fetchStatus, 2500);
     return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const timeAgo = lastUpdated
@@ -614,11 +619,22 @@ export default function AIBrainPage() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            {brainStatus?.graphData ? (
-              <SemanticGraph data={brainStatus.graphData} />
+            {adminInfo.knowledgeGraph.nodes.length > 0 ? (
+              <SemanticGraph data={{
+                nodes: adminInfo.knowledgeGraph.nodes.map(n => ({
+                  id: n.id,
+                  name: n.label,
+                  group: n.type,
+                  val: 5 + (n.properties?.weight || 0) * 5
+                })),
+                links: adminInfo.knowledgeGraph.edges.map(e => ({
+                  source: e.sourceId,
+                  target: e.targetId
+                }))
+              }} />
             ) : (
               <div className="w-full h-[400px] flex flex-col items-center justify-center text-muted-foreground bg-black/40">
-                {isLoading ? "Initializing Physics Engine..." : "No semantic data available."}
+                {adminInfo.isLoading ? "Initializing Physics Engine..." : "No semantic data available."}
               </div>
             )}
           </CardContent>

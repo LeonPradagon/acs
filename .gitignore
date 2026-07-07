@@ -5,7 +5,21 @@
 node_modules/
 .DS_Store
 
+# Build outputs
+dist/
+build/
+.next/
+out/
+coverage/
+
 # IDE and OS files
 .vscode/
 .idea/
 Thumbs.db
+*.swp
+*~
+
+# Temporary files
+tmp/
+temp/
+.temp/

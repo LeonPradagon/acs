@@ -22,11 +22,42 @@ export interface AdminDocument {
   createdAt: string;
   user?: { email: string; name: string };
   userId?: string | null;
+  version?: number;
+  deletedAt?: string | null;
+  embeddingJobs?: { status: string; progress: number }[];
+}
+
+export interface SecurityLog {
+  id: string;
+  traceId: string;
+  name: string;
+  status: string;
+  durationMs: number;
+  error?: string | null;
+  metadata?: any;
+  createdAt: string;
+}
+
+export interface KnowledgeGraphData {
+  nodes: { id: string; label: string; type: string; properties?: any }[];
+  edges: { id: string; sourceId: string; targetId: string; relationship: string; weight: number }[];
+}
+
+export interface PromptVersion {
+  id: string;
+  name: string;
+  version: number;
+  content: string;
+  isActive: boolean;
+  createdAt: string;
 }
 
 export function useAdmin() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [documents, setDocuments] = useState<AdminDocument[]>([]);
+  const [securityLogs, setSecurityLogs] = useState<SecurityLog[]>([]);
+  const [prompts, setPrompts] = useState<PromptVersion[]>([]);
+  const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeGraphData>({ nodes: [], edges: [] });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,7 +130,28 @@ export function useAdmin() {
     try {
       const { data } = await apiClient.delete(`/api/admin/documents/${id}`);
       if (data.success) {
-        setDocuments(documents.filter((d) => d.id !== id));
+        setDocuments(documents.map((d) => 
+          d.id === id ? { ...d, deletedAt: d.deletedAt ? d.deletedAt : new Date().toISOString() } : d
+        ));
+        // If it was already deleted, it's permanently deleted so remove it
+        if (data.message.includes("permanently")) {
+          setDocuments(documents.filter((d) => d.id !== id));
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const restoreDocument = async (id: string) => {
+    try {
+      const { data } = await apiClient.post(`/api/admin/documents/${id}/restore`);
+      if (data.success) {
+        setDocuments(documents.map((d) => 
+          d.id === id ? { ...d, deletedAt: null } : d
+        ));
         return true;
       }
       return false;
@@ -110,6 +162,32 @@ export function useAdmin() {
 
   const [settings, setSettings] = useState<Record<string, string>>({});
 
+  const fetchSecurityLogs = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { data } = await apiClient.get("/api/admin/security-logs");
+      if (data.success) setSecurityLogs(data.data);
+      else setError(data.error);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const fetchKnowledgeGraph = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { data } = await apiClient.get("/api/admin/knowledge-graph");
+      if (data.success) setKnowledgeGraph(data.data);
+      else setError(data.error);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   const fetchSystemSettings = useCallback(async () => {
     try {
       const { data } = await apiClient.get("/api/admin/settings");
@@ -118,6 +196,52 @@ export function useAdmin() {
       console.error("Failed to fetch settings", err);
     }
   }, []);
+
+  const fetchPrompts = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { data } = await apiClient.get("/api/admin/prompts");
+      if (data.success) setPrompts(data.data);
+      else setError(data.error);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const savePrompt = async (name: string, content: string) => {
+    try {
+      const { data } = await apiClient.post("/api/admin/prompts", { name, content });
+      if (data.success) {
+        setPrompts([data.data, ...prompts]);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const activatePrompt = async (id: string) => {
+    try {
+      const { data } = await apiClient.post(`/api/admin/prompts/${id}/activate`);
+      if (data.success) {
+        // Optimistic update
+        const targetPrompt = prompts.find(p => p.id === id);
+        if (targetPrompt) {
+          setPrompts(prompts.map(p => ({
+            ...p,
+            isActive: p.name === targetPrompt.name ? (p.id === id) : p.isActive
+          })));
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
+  };
 
   const updateSystemSetting = async (key: string, value: string) => {
     try {
@@ -153,6 +277,15 @@ export function useAdmin() {
     deleteUser,
     fetchDocuments,
     deleteDocument,
+    restoreDocument,
+    fetchSecurityLogs,
+    securityLogs,
+    fetchKnowledgeGraph,
+    knowledgeGraph,
+    fetchPrompts,
+    prompts,
+    savePrompt,
+    activatePrompt,
     fetchSystemSettings,
     updateSystemSetting,
     testConnection,

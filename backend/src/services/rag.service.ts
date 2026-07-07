@@ -1,10 +1,19 @@
 import { prisma, esClient, pgVectorAvailable } from "../config/db";
 import { EmbeddingService } from "./embedding.service";
-
+import { redisConnection } from "../config/redis";
+import { AdaptiveRetrievalService } from "./adaptive-retrieval.service";
+import crypto from "crypto";
 export interface RagContext {
   content: string;
   source: string;
   score?: number;
+  documentId?: string;
+  chunkId?: string;
+  pageNumber?: number;
+  heading?: string;
+  sectionPath?: string;
+  highlight?: string;
+  metadata?: Record<string, any>;
 }
 
 // Minimum relevance score — results below this are filtered out
@@ -143,6 +152,23 @@ function extractKeywords(query: string): string[] {
     .filter((word) => word.length > 2 && !STOPWORDS.has(word));
 }
 
+// L1 Cache (In-Memory)
+const L1_CACHE = new Map<string, { data: RagContext[], expiresAt: number }>();
+const CACHE_TTL_SEC = 3600; // 1 Hour
+
+export const clearRagCache = async () => {
+  L1_CACHE.clear();
+  try {
+    const keys = await redisConnection.keys("rag_cache:*");
+    if (keys.length > 0) {
+      await redisConnection.del(...keys);
+    }
+    console.log("[RAG Cache] Cleared L1 and L2 caches.");
+  } catch (err) {
+    console.warn("[RAG Cache] Failed to clear Redis:", err);
+  }
+};
+
 /**
  * Searches for relevant context using Hybrid Search:
  * 1. Elasticsearch kNN (Semantic/Vector)
@@ -150,6 +176,34 @@ function extractKeywords(query: string): string[] {
  * with a PostgreSQL fallback.
  */
 export const retrieveContext = async (query: string, userId?: string, divisionId?: string | null, role: string = 'user', clearanceLevel: number = 1): Promise<RagContext[]> => {
+  // Generate Cache Key
+  const cachePayload = `${query.trim().toLowerCase()}_${role}_${divisionId || 'ALL'}_${clearanceLevel}`;
+  const cacheKeyHash = crypto.createHash('sha256').update(cachePayload).digest('hex');
+  const cacheKey = `rag_cache:${cacheKeyHash}`;
+
+  // 1. Check L1 Cache
+  const now = Date.now();
+  const l1Hit = L1_CACHE.get(cacheKey);
+  if (l1Hit && l1Hit.expiresAt > now) {
+    console.log(`[RAG Cache] L1 Hit for: ${query}`);
+    return l1Hit.data;
+  }
+
+  // 2. Check L2 Cache (Redis)
+  try {
+    const l2Hit = await redisConnection.get(cacheKey);
+    if (l2Hit) {
+      console.log(`[RAG Cache] L2 Hit for: ${query}`);
+      const parsedData = JSON.parse(l2Hit);
+      
+      // Populate L1 cache for future
+      L1_CACHE.set(cacheKey, { data: parsedData, expiresAt: now + (CACHE_TTL_SEC * 1000) });
+      return parsedData;
+    }
+  } catch (err) {
+    console.warn("[RAG Cache] L2 read failed:", err);
+  }
+
   let contexts: RagContext[] = [];
   const queryLower = query.toLowerCase();
 
@@ -212,13 +266,16 @@ export const retrieveContext = async (query: string, userId?: string, divisionId
         }
       ];
 
+      const adaptiveConfig = AdaptiveRetrievalService.determineConfig(query);
+      const topK = adaptiveConfig.topK;
+
       try {
         const esResponse = await esClient.search({
         index: "documents",
         knn: {
           field: "embedding",
           query_vector: queryVector,
-          k: 10,
+          k: topK,
           num_candidates: 100,
           filter: esFilter.length > 0 ? esFilter[0] : undefined
         },
@@ -236,7 +293,7 @@ export const retrieveContext = async (query: string, userId?: string, divisionId
             filter: esFilter
           },
         },
-        size: 10,
+        size: topK,
       });
 
       if (esResponse.hits.hits.length > 0) {
@@ -259,8 +316,11 @@ export const retrieveContext = async (query: string, userId?: string, divisionId
     }
   }
 
-  // 4. PostgreSQL Fallback (if ES is sparse)
-  if (contexts.length < 3) {
+  // Filter valid ES contexts before deciding to fallback
+  const validEsContexts = contexts.filter((c) => (c.score || 0) >= MIN_RELEVANCE_SCORE);
+
+  // 4. PostgreSQL Fallback (if ES is sparse or irrelevant)
+  if (validEsContexts.length < 3) {
     // 4a. pgvector cosine similarity search (primary PG fallback)
     if (pgVectorAvailable && queryVector) {
       try {
@@ -387,6 +447,15 @@ export const retrieveContext = async (query: string, userId?: string, divisionId
 
   // Filter out low-relevance results
   const filtered = contexts.filter((c) => (c.score || 0) >= MIN_RELEVANCE_SCORE);
+  const finalContexts = filtered.slice(0, 15);
 
-  return filtered.slice(0, 15);
+  // Set L1 and L2 Caches
+  L1_CACHE.set(cacheKey, { data: finalContexts, expiresAt: Date.now() + (CACHE_TTL_SEC * 1000) });
+  try {
+    await redisConnection.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(finalContexts));
+  } catch (err) {
+    console.warn("[RAG Cache] L2 write failed:", err);
+  }
+
+  return finalContexts;
 };

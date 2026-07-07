@@ -19,9 +19,11 @@ import { requestLogger } from "./middleware/logger.middleware";
 import { env } from "./common/env";
 import { EmbeddingService } from "./services/embedding.service";
 
+import { httpTracingMiddleware } from "./config/tracing";
 
 const app = express();
 
+app.use(httpTracingMiddleware);
 // ============================================================
 // Security Middleware
 // ============================================================
@@ -111,11 +113,17 @@ const chatLimiter = rateLimit({
 
 app.use(globalLimiter);
 
+import { apiVersionMiddleware, userRateLimiter } from "./middleware/api-version.middleware";
+
 // ============================================================
-// Routes
+// Routes (API Gateway Layer)
 // ============================================================
+// API Versioning
+app.use("/api", apiVersionMiddleware("v1"));
+
 app.use("/api/auth", authRoutes);
-app.use("/api/chat", chatLimiter, chatRoutes);
+// Chat endpoint uses stricter userRateLimiter instead of generic chatLimiter
+app.use("/api/chat", userRateLimiter, chatRoutes);
 app.use("/api/rag", documentRoutes);
 app.use("/api/health", healthRoutes);
 app.use("/api/admin", adminRoutes);

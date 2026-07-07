@@ -26,6 +26,7 @@ export const useChat = (options: UseChatOptions = {}) => {
   );
   const [effortLevel, setEffortLevel] = useState<string>("medium");
   const [isThinking, setIsThinking] = useState<boolean>(true);
+  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState<boolean>(true);
 
   // Compose session management from extracted hook
   const sessionManager = useChatSessions();
@@ -315,7 +316,9 @@ export const useChat = (options: UseChatOptions = {}) => {
         files,
         activeModel,
         activeEffort,
-        activeThinking
+        activeThinking,
+        isWebSearchEnabled,
+        images
       );
 
       setChatHistory((prev) => [...prev, result]);
@@ -377,6 +380,8 @@ export const useChat = (options: UseChatOptions = {}) => {
     setEffortLevel,
     isThinking,
     setIsThinking,
+    isWebSearchEnabled,
+    setIsWebSearchEnabled,
     messagesEndRef,
     textareaRef,
     clearChat,

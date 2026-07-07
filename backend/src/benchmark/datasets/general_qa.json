@@ -1,0 +1,13 @@
+{
+  "name": "general_qa",
+  "items": [
+    {
+      "query": "What is the capital of Indonesia?",
+      "expectedAnswer": "Jakarta"
+    },
+    {
+      "query": "Siapa presiden pertama Indonesia?",
+      "expectedAnswer": "Soekarno"
+    }
+  ]
+}

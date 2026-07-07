@@ -78,32 +78,68 @@ export class ErpService {
    * Throws an error if the query is unsafe. Appends a LIMIT of 500 if none is present.
    */
   private static validateReadOnlyQuery(query: string): string {
-    const upperQuery = query.toUpperCase();
-    const disallowedVerbs = [
-      "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
-      "CREATE", "GRANT", "REVOKE", "COMMIT", "ROLLBACK",
-      "COPY", "EXECUTE", "CALL", "SET", "DO", "NOTIFY", "LISTEN",
-    ];
-    
-    for (const verb of disallowedVerbs) {
-      const verbRegex = new RegExp(`\\b${verb}\\b`, "i");
-      if (verbRegex.test(upperQuery)) {
-        throw new Error(`Execution blocked: Query contains disallowed keyword: ${verb}. Only SELECT operations are allowed.`);
-      }
+    let ast: any[];
+    try {
+      // Lazy require to avoid top-level load overhead if not used
+      const { parse } = require("pgsql-ast-parser");
+      ast = parse(query);
+    } catch (err: any) {
+      throw new Error(`Execution blocked: SQL syntax error: ${err.message}`);
     }
 
-    if (!upperQuery.trim().startsWith("SELECT")) {
-      throw new Error(`Execution blocked: Query must start with SELECT.`);
+    if (!ast || ast.length === 0) {
+      throw new Error("Execution blocked: Empty query.");
     }
 
-    // Block semicolons to prevent multi-statement injection
-    if (query.includes(";")) {
+    if (ast.length > 1) {
       throw new Error("Execution blocked: Multi-statement queries are not allowed.");
     }
 
+    const stmt = ast[0];
+    
+    // Recursive check for disallowed statement types
+    const disallowedTypes = new Set([
+      'insert', 'update', 'delete', 'drop', 'alter', 'create', 
+      'truncate', 'grant', 'revoke', 'commit', 'rollback', 
+      'copy', 'execute', 'call', 'set', 'do', 'notify', 'listen'
+    ]);
+
+    const hasDisallowedNode = (obj: any): boolean => {
+      if (Array.isArray(obj)) {
+        return obj.some(hasDisallowedNode);
+      }
+      if (obj !== null && typeof obj === 'object') {
+        if (typeof obj.type === 'string' && disallowedTypes.has(obj.type.toLowerCase())) {
+          return true;
+        }
+        for (const key of Object.keys(obj)) {
+          if (hasDisallowedNode(obj[key])) return true;
+        }
+      }
+      return false;
+    };
+
+    if (hasDisallowedNode(stmt)) {
+      throw new Error("Execution blocked: Query contains disallowed statement types (e.g., INSERT, UPDATE, DELETE). Only SELECT operations are allowed.");
+    }
+    
+    // Top-level statement must be SELECT or WITH
+    if (stmt.type !== 'select' && stmt.type !== 'with') {
+      throw new Error("Execution blocked: Query must be a SELECT statement.");
+    }
+
     // Append limit if not present
-    let modifiedQuery = query.trim();
-    if (!upperQuery.includes("LIMIT")) {
+    let modifiedQuery = query.trim().replace(/;$/, "");
+    
+    // We check if it has a limit at the top level
+    let hasLimit = false;
+    if (stmt.type === 'select' && stmt.limit) {
+      hasLimit = true;
+    } else if (stmt.type === 'with' && stmt.in && stmt.in.type === 'select' && stmt.in.limit) {
+      hasLimit = true;
+    }
+
+    if (!hasLimit) {
       modifiedQuery = `${modifiedQuery} LIMIT 500`;
     }
 

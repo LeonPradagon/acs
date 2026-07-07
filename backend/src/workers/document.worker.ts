@@ -66,7 +66,7 @@ export const documentWorker = new Worker(
       for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
         const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE);
         const embeddings = await Promise.all(
-          batch.map((chunk) => EmbeddingService.generateEmbedding(chunk)),
+          batch.map((chunk) => EmbeddingService.generateEmbedding(chunk.content)),
         );
 
         for (let j = 0; j < batch.length; j++) {
@@ -80,7 +80,8 @@ export const documentWorker = new Worker(
           });
           esOperations.push({
             title: doc.title,
-            content: batch[j],
+            content: batch[j].content,
+            heading: batch[j].heading,
             category: doc.category,
             classification: doc.classification,
             tags: doc.tags,
@@ -122,12 +123,17 @@ export const documentWorker = new Worker(
 
         // Insert chunks via Prisma
         const createdChunks = await prisma.documentChunk.createMany({
-          data: chunks.map((chunkContent, idx) => ({
+          data: chunks.map((chunk, idx) => ({
             documentId: doc.id,
-            content: chunkContent,
+            content: chunk.content,
+            heading: chunk.heading,
             chunkIndex: idx,
           })),
         });
+
+        console.log(
+          `[Worker] Stored ${createdChunks.count} chunks in PostgreSQL for ${originalname}`,
+        );
 
         // If pgvector is available, update embedding column via raw SQL
         if (pgVectorAvailable) {
@@ -162,7 +168,17 @@ export const documentWorker = new Worker(
         );
       }
 
-      // 5. Update Status to COMPLETED
+      // 5. Extract Knowledge Graph (Async fire-and-forget, or await if needed)
+      try {
+        const { KnowledgeGraphService } = await import("../services/knowledge-graph.service");
+        // Limit text length to avoid LLM overload during extraction
+        const textToAnalyze = content.substring(0, 15000); 
+        await KnowledgeGraphService.extractAndStoreGraph(doc.id, textToAnalyze);
+      } catch (kgError: any) {
+        console.warn(`[Worker] Knowledge Graph extraction failed: ${kgError.message}`);
+      }
+
+      // 6. Update Status to COMPLETED
       await prisma.document.update({
         where: { id: documentId },
         data: { status: "COMPLETED" },

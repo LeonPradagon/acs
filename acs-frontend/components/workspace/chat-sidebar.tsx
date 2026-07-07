@@ -24,6 +24,7 @@ import {
   Shield,
   RefreshCw,
 } from "lucide-react";
+import Image from "next/image";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button"; // Hanya dipakai untuk tombol utama, bukan trigger dropdown
 import { Input } from "@/components/ui/input";
@@ -36,7 +37,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
+import { HelpModals, HelpModalType } from "./help-modals";
 import {
   Dialog,
   DialogContent,
@@ -93,6 +98,7 @@ export function ChatSidebar({
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [activeHelpModal, setActiveHelpModal] = useState<HelpModalType>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -208,6 +214,70 @@ export function ChatSidebar({
         >
           {/* Sidebar Header — fixed at top */}
           <div className="p-4 flex flex-col gap-3 shrink-0">
+            {/* Brand Logo & Collapse Toggle */}
+            <div className={cn("flex items-center mb-1", isOpen ? "justify-between" : "justify-center")}>
+              {isOpen ? (
+                <>
+                  <div className="flex items-center gap-2 pl-1">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden p-0.5">
+                      <Image src="/images/Asisgo.png" alt="ACS" width={32} height={32} className="w-full h-full object-contain" />
+                    </div>
+                    <span className="font-bold text-sm tracking-tight text-foreground">ACS Platform</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onToggle}
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg"
+                    title="Close sidebar"
+                  >
+                    <svg
+                      stroke="currentColor"
+                      fill="none"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-4 h-4"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <line x1="9" y1="3" x2="9" y2="21"></line>
+                    </svg>
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onToggle}
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg mx-auto group relative overflow-hidden"
+                  title="Open sidebar"
+                >
+                  {/* Logo visible by default when collapsed */}
+                  <div className="absolute inset-0 flex items-center justify-center transition-opacity duration-200 opacity-100 group-hover:opacity-0 p-1">
+                    <Image src="/images/Asisgo.png" alt="ACS" width={24} height={24} className="w-full h-full object-contain" />
+                  </div>
+                  {/* Toggle icon visible on hover */}
+                  <div className="absolute inset-0 flex items-center justify-center transition-opacity duration-200 opacity-0 group-hover:opacity-100">
+                    <svg
+                      stroke="currentColor"
+                      fill="none"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-4 h-4"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <line x1="9" y1="3" x2="9" y2="21"></line>
+                    </svg>
+                  </div>
+                </Button>
+              )}
+            </div>
+
             <Button
               onClick={onNewSession}
               variant="outline"
@@ -231,19 +301,26 @@ export function ChatSidebar({
             {/* Search Trigger Button */}
             <div
               className={cn(
-                "relative transition-all duration-300 cursor-pointer group",
+                "relative transition-all duration-300 cursor-pointer group flex items-center justify-center bg-black/5 dark:bg-black/30 shadow-inner hover:bg-black/10 dark:hover:bg-black/40",
                 isOpen
-                  ? "opacity-100 h-10 mt-1"
-                  : "opacity-0 h-0 w-0 overflow-hidden mt-0",
+                  ? "h-10 mt-1 w-full rounded-2xl"
+                  : "h-11 w-11 mx-auto mt-2 rounded-full",
               )}
               onClick={() => setIsSearchModalOpen(true)}
+              title={!isOpen ? "Search chats" : undefined}
             >
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-4 w-4 text-muted-foreground/60 group-hover:text-foreground/80 transition-colors" />
-              </div>
-              <div className="flex items-center w-full bg-black/5 dark:bg-black/30 border-none pl-9 rounded-2xl h-10 text-sm shadow-inner text-muted-foreground/70 transition-colors group-hover:bg-black/10 dark:group-hover:bg-black/40">
-                Search chats and projects
-              </div>
+              {isOpen ? (
+                <>
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search className="h-4 w-4 text-muted-foreground/60 group-hover:text-foreground/80 transition-colors" />
+                  </div>
+                  <div className="flex items-center w-full pl-9 h-10 text-sm text-muted-foreground/70">
+                    Search chats and projects
+                  </div>
+                </>
+              ) : (
+                <Search className="h-5 w-5 text-muted-foreground/60 group-hover:text-foreground/80 transition-colors" />
+              )}
             </div>
           </div>
 
@@ -478,11 +555,6 @@ export function ChatSidebar({
 
                     <div className="h-px bg-border my-1 mx-2" />
 
-                    <DropdownMenuItem className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
-                      <Zap className="w-4 h-4 text-muted-foreground" />{" "}
-                      Personalization
-                    </DropdownMenuItem>
-
                     <DropdownMenuItem 
                       className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors"
                       onClick={() => window.location.href = "/profile"}
@@ -522,26 +594,40 @@ export function ChatSidebar({
                       </DropdownMenuItem>
                     )}
 
-                    <DropdownMenuItem
-                      disabled={!isAdmin}
-                      onSelect={() => {
-                        window.location.href = '/admin/users';
-                      }}
-                      className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors text-indigo-500/80 hover:text-indigo-500"
-                    >
-                      <Shield className="w-4 h-4" />{" "}
-                      {isAdmin ? "Admin Dashboard" : "Admin Settings"}
-                    </DropdownMenuItem>
-
                     <div className="h-px bg-border my-1 mx-2" />
 
-                    <DropdownMenuItem className="flex justify-between items-center cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
-                      <div className="flex items-center gap-3">
-                        <HelpCircle className="w-4 h-4 text-muted-foreground" />{" "}
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="gap-3 cursor-pointer py-3 px-2 rounded-xl text-[13px] font-medium transition-colors">
+                        <HelpCircle className="w-4 h-4 text-muted-foreground" />
                         Help
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                    </DropdownMenuItem>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent
+                          className="w-[200px] p-2 rounded-xl border shadow-xl z-[99999]"
+                          sideOffset={8}
+                        >
+                          <DropdownMenuItem 
+                            onSelect={() => setActiveHelpModal("tos")}
+                            className="cursor-pointer py-2 px-2 rounded-lg text-xs font-medium"
+                          >
+                            Terms of Service
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onSelect={() => setActiveHelpModal("privacy")}
+                            className="cursor-pointer py-2 px-2 rounded-lg text-xs font-medium"
+                          >
+                            Privacy Policy
+                          </DropdownMenuItem>
+                          <div className="h-px bg-border my-1 mx-2" />
+                          <DropdownMenuItem 
+                            onSelect={() => setActiveHelpModal("bug")}
+                            className="cursor-pointer py-2 px-2 rounded-lg text-xs font-medium text-destructive focus:text-destructive focus:bg-destructive/10"
+                          >
+                            Report a Bug
+                          </DropdownMenuItem>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
 
                     <DropdownMenuItem
                       onSelect={() => {
@@ -558,16 +644,6 @@ export function ChatSidebar({
           </div>
         </div>
 
-        {/* Collapse Toggle Button - Desktop Only */}
-        <div className="hidden lg:block absolute top-1/2 right-[-14px] -translate-y-1/2 transition-all duration-300 ease-in-out z-50">
-          <button
-            onClick={onToggle}
-            className="flex h-12 w-3.5 items-center justify-center rounded-r-2xl bg-[var(--surface-container-lowest)] text-muted-foreground hover:text-foreground shadow-[12px_0_20px_rgba(45,52,51,0.03)] transition-colors cursor-pointer group/toggle focus:outline-none"
-            title={isOpen ? "Tutup Sidebar" : "Buka Sidebar"}
-          >
-            <div className="w-1 h-3 rounded-full bg-muted-foreground/30 transition-colors group-hover/toggle:bg-muted-foreground" />
-          </button>
-        </div>
       </div>
       {/* Search Modal */}
       <Dialog 
@@ -656,6 +732,12 @@ export function ChatSidebar({
           </Command>
         </DialogContent>
       </Dialog>
+      
+      {/* Help Modals */}
+      <HelpModals 
+        activeModal={activeHelpModal} 
+        onClose={() => setActiveHelpModal(null)} 
+      />
     </>
   );
 }

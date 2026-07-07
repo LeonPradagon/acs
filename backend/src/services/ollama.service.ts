@@ -9,7 +9,7 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 
 // Safety: max number of tool call rounds to prevent infinite loops
-const MAX_TOOL_DEPTH = 3;
+const MAX_TOOL_DEPTH = 5;
 
 interface ChatMessageInput {
   role: "system" | "user" | "assistant" | "tool";
@@ -18,18 +18,20 @@ interface ChatMessageInput {
   tool_calls?: any[];
   name?: string;
 }
+import { PromptService } from "./prompt.service";
+import { ModelRouterService } from "./model-router.service";
 
 /**
  * Build the system prompt with optional RAG context
  */
-const buildSystemPrompt = (context: RagContext[], currentUserDivision: string | null, erpMode: string = "DB"): string => {
+const buildSystemPrompt = async (context: RagContext[], currentUserDivision: string | null, erpMode: string = "DB"): Promise<string> => {
   const contextString = context
     .map((c, i) => `<document index="${i + 1}" source="${c.source}">\n${c.content}\n</document>`)
     .join("\n\n");
 
   const hasContext = context.length > 0;
 
-  return `Anda adalah ACS AI Assistant — asisten kecerdasan buatan yang canggih, membantu, dan akurat.
+  const fallbackTemplate = `Anda adalah ACS AI Assistant — asisten kecerdasan buatan yang canggih, membantu, dan akurat.
 
 <role>
 - Anda adalah asisten serba bisa yang bisa menjawab pertanyaan umum, membantu analisis, memberikan saran, dan berdiskusi seperti AI Assistant modern (ChatGPT, Gemini, Claude).
@@ -53,27 +55,34 @@ Pilihan format yang didukung HANYA: pdf, docx, xlsx, pptx, csv, md. Pastikan isi
 - Gunakan Markdown dengan heading (##), bullet points, bold (**teks**), dan code blocks sesuai kebutuhan.
 - Untuk penjelasan panjang, bagi menjadi beberapa bagian yang terstruktur.
 - Berikan jawaban yang lengkap namun padat dan jelas.
-- Saat menjawab tentang data perusahaan (gaji, karyawan, divisi), JANGAN asumsikan angka, panggil ALWAYS function \`${erpMode === 'DB' ? 'query_erp_sql' : 'query_erp_api'}\`.
+- Saat menjawab tentang data perusahaan (gaji, karyawan, divisi), JANGAN asumsikan angka, panggil ALWAYS function \`{{ERP_FUNCTION}}\`.
 </format>
 
 <database>
-${erpMode === 'DB' ? ErpService.getErpSchemaInfo() : ErpService.getErpApiInfo()}
+{{ERP_SCHEMA}}
 
 [Divisi Pengguna (Penting!)]:
-Pengguna saat ini berada di divisi: ${currentUserDivision || "Global/Superadmin"}.
-Jika pengguna menanyakan data seputar "karyawan divisi ini", "gaji tim", ${erpMode === 'DB' ? `otomatis gunakan klausa WHERE divisionName = '${currentUserDivision || "SEMUA"}' dalam query_erp_sql Anda.` : `tambahkan query parameter divisionName='${currentUserDivision}' di dalam argumen queryParams json.`}
+Pengguna saat ini berada di divisi: {{USER_DIVISION}}.
+Jika pengguna menanyakan data seputar "karyawan divisi ini", "gaji tim", {{ERP_RULES}}
 Jika pengguna adalah Global, LLM dapat menanyakan seluruh karyawan.
 </database>
 
-${
-  hasContext
-    ? `<context>
-Kumpulan dokumen referensi berikut ditarik dari database berdasarkan pertanyaan pengguna:
+{{CONTEXT}}`;
 
-${contextString}
-</context>`
-    : "<context>\nTidak ada data spesifik dari database untuk query ini. Jawab berdasarkan pengetahuan umum Anda.\n</context>"
-}`;
+  let systemPrompt = await PromptService.getActivePrompt("SYSTEM_PROMPT", fallbackTemplate);
+
+  systemPrompt = systemPrompt.replace("{{ERP_FUNCTION}}", erpMode === 'DB' ? 'query_erp_sql' : 'query_erp_api');
+  systemPrompt = systemPrompt.replace("{{ERP_SCHEMA}}", erpMode === 'DB' ? ErpService.getErpSchemaInfo() : ErpService.getErpApiInfo());
+  systemPrompt = systemPrompt.replace("{{USER_DIVISION}}", currentUserDivision || "Global/Superadmin");
+  systemPrompt = systemPrompt.replace("{{ERP_RULES}}", erpMode === 'DB' ? `otomatis gunakan klausa WHERE divisionName = '${currentUserDivision || "SEMUA"}' dalam query_erp_sql Anda.` : `tambahkan query parameter divisionName='${currentUserDivision}' di dalam argumen queryParams json.`);
+  
+  const contextReplacement = hasContext
+    ? `<context>\nKumpulan dokumen referensi berikut ditarik dari database berdasarkan pertanyaan pengguna:\n\n${contextString}\n</context>`
+    : "<context>\nTidak ada data spesifik dari database untuk query ini. Jawab berdasarkan pengetahuan umum Anda.\n</context>";
+  
+  systemPrompt = systemPrompt.replace("{{CONTEXT}}", contextReplacement);
+
+  return systemPrompt;
 };
 
 /**
@@ -149,7 +158,11 @@ const convertMessages = (messages: ChatMessageInput[]) => {
     if (m.role === "system") {
       lcMessages.push(new SystemMessage(m.content as string));
     } else if (m.role === "user") {
-      lcMessages.push(new HumanMessage(m.content as string));
+      if (Array.isArray(m.content)) {
+        lcMessages.push(new HumanMessage({ content: m.content }));
+      } else {
+        lcMessages.push(new HumanMessage(m.content as string));
+      }
     } else if (m.role === "assistant") {
       lcMessages.push(new AIMessage({
         content: m.content as string,
@@ -173,28 +186,31 @@ export const getUniversalResponse = async (
   context: RagContext[],
   model: string = "openai/gpt-oss-120b",
   conversationHistory: ChatMessageInput[] = [],
-  currentUserDivision: string | null = null
+  currentUserDivision: string | null = null,
+  images: string[] = []
 ): Promise<any> => {
   const erpMode = await getCurrentErpMode();
-  const systemPrompt = buildSystemPrompt(context, currentUserDivision, erpMode);
+  const systemPrompt = await buildSystemPrompt(context, currentUserDivision, erpMode);
   const tools = getTools(erpMode, currentUserDivision);
   
   const lcHistory = convertMessages(conversationHistory);
   lcHistory.unshift(new SystemMessage(systemPrompt));
-  lcHistory.push(new HumanMessage(query));
+  
+  if (images && images.length > 0) {
+    const multimodalContent: any[] = [
+      { type: "text", text: query },
+      ...images.map(img => ({ type: "image_url", image_url: { url: img } }))
+    ];
+    lcHistory.push(new HumanMessage({ content: multimodalContent }));
+  } else {
+    lcHistory.push(new HumanMessage(query));
+  }
 
-  const llm = new ChatOpenAI({
-    apiKey: process.env.OLLAMA_API_KEY,
-    model: process.env.OLLAMA_MODEL || (model === "openai/gpt-oss-120b" ? "gpt-oss:120b-cloud" : (model ? model.replace("openai/", "") : "gpt-oss:120b-cloud")),
-    configuration: {
-      baseURL: process.env.OLLAMA_BASE_URL || "https://ollama.com/v1", // Default to Ollama Cloud
-    },
-    temperature: 0.3,
-    maxTokens: 4096,
-    maxRetries: 3
-  });
-
-  const llmWithTools = llm.bindTools(tools);
+  const complexity = ModelRouterService.classifyQuery(query, context.length > 0, "medium");
+  const routedModel = ModelRouterService.routeModel(complexity);
+  
+  // Create LLM with Fallback chain
+  const llmWithTools = ModelRouterService.createLLMWithFallback(routedModel, 4096, tools);
   
   let depth = 0;
   let finalMessage: AIMessage | null = null;
@@ -208,16 +224,42 @@ export const getUniversalResponse = async (
       break;
     }
     
-    for (const toolCall of response.tool_calls) {
-      const tool = tools.find(t => t.name === toolCall.name);
+    const toolPromises = response.tool_calls.map(async (toolCall) => {
+      const tool = tools.find((t) => t.name === toolCall.name);
       if (tool) {
-        const result = await (tool as any).invoke(toolCall.args);
-        lcHistory.push(new ToolMessage({
-          tool_call_id: toolCall.id || "",
-          content: result
-        }));
+        let retries = 2;
+        while (retries >= 0) {
+          try {
+            // 10 second timeout per tool
+            const result = await Promise.race([
+              (tool as any).invoke(toolCall.args),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("Timeout")), 10000)
+              ),
+            ]);
+            return new ToolMessage({
+              tool_call_id: toolCall.id || "",
+              content: result,
+            });
+          } catch (e: any) {
+            if (retries === 0) {
+              return new ToolMessage({
+                tool_call_id: toolCall.id || "",
+                content: `Error: ${e.message}`,
+              });
+            }
+            retries--;
+          }
+        }
       }
-    }
+      return new ToolMessage({
+        tool_call_id: toolCall.id || "",
+        content: "Tool not found",
+      });
+    });
+
+    const toolMessages = await Promise.all(toolPromises);
+    lcHistory.push(...toolMessages);
     depth++;
   }
 
@@ -251,27 +293,30 @@ export const getStreamingResponse = async (
   onToken: (token: string) => void,
   onDone: () => void,
   abortSignal?: AbortSignal,
+  images: string[] = [],
 ): Promise<void> => {
   const erpMode = await getCurrentErpMode();
-  const systemPrompt = buildSystemPrompt(context, currentUserDivision, erpMode);
+  const systemPrompt = await buildSystemPrompt(context, currentUserDivision, erpMode);
   const tools = getTools(erpMode, currentUserDivision);
   
   const lcHistory = convertMessages(conversationHistory);
   lcHistory.unshift(new SystemMessage(systemPrompt));
-  lcHistory.push(new HumanMessage(query));
+  
+  if (images && images.length > 0) {
+    const multimodalContent: any[] = [
+      { type: "text", text: query },
+      ...images.map(img => ({ type: "image_url", image_url: { url: img } }))
+    ];
+    lcHistory.push(new HumanMessage({ content: multimodalContent }));
+  } else {
+    lcHistory.push(new HumanMessage(query));
+  }
 
-  const llm = new ChatOpenAI({
-    apiKey: process.env.OLLAMA_API_KEY,
-    model: process.env.OLLAMA_MODEL || (model === "openai/gpt-oss-120b" ? "gpt-oss:120b-cloud" : (model ? model.replace("openai/", "") : "gpt-oss:120b-cloud")),
-    configuration: {
-      baseURL: process.env.OLLAMA_BASE_URL || "https://ollama.com/v1", // Default to Ollama Cloud
-    },
-    temperature: 0.3,
-    maxTokens: 4096,
-    maxRetries: 3
-  });
-
-  const llmWithTools = llm.bindTools(tools);
+  const complexity = ModelRouterService.classifyQuery(query, context.length > 0, "medium");
+  const routedModel = ModelRouterService.routeModel(complexity);
+  
+  // Create LLM with Fallback chain
+  const llmWithTools = ModelRouterService.createLLMWithFallback(routedModel, 4096, tools);
 
   try {
     let depth = 0;
@@ -324,16 +369,41 @@ export const getStreamingResponse = async (
         tool_calls: toolCalls
       }));
       
-      for (const toolCall of toolCalls) {
-        const tool = tools.find(t => t.name === toolCall.name);
+      const toolPromises = toolCalls.map(async (toolCall) => {
+        const tool = tools.find((t) => t.name === toolCall.name);
         if (tool) {
-          const result = await (tool as any).invoke(toolCall.args);
-          lcHistory.push(new ToolMessage({
-            tool_call_id: toolCall.id || "",
-            content: result
-          }));
+          let retries = 2;
+          while (retries >= 0) {
+            try {
+              const result = await Promise.race([
+                (tool as any).invoke(toolCall.args),
+                new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error("Timeout")), 10000)
+                ),
+              ]);
+              return new ToolMessage({
+                tool_call_id: toolCall.id || "",
+                content: result,
+              });
+            } catch (e: any) {
+              if (retries === 0) {
+                return new ToolMessage({
+                  tool_call_id: toolCall.id || "",
+                  content: `Error: ${e.message}`,
+                });
+              }
+              retries--;
+            }
+          }
         }
-      }
+        return new ToolMessage({
+          tool_call_id: toolCall.id || "",
+          content: "Tool not found",
+        });
+      });
+
+      const toolMessages = await Promise.all(toolPromises);
+      lcHistory.push(...toolMessages);
       
       depth++;
     }

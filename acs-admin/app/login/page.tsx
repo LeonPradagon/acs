@@ -99,6 +99,7 @@ export default function LoginPage() {
     return () => {
       clearAllIntervals();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const clearAllIntervals = () => {
@@ -446,8 +447,10 @@ export default function LoginPage() {
             >
               {isLoading ? (
                 <span className="flex items-center justify-center gap-2">
-                  <img
+                  <Image
                     src={appLogo}
+                    width={20}
+                    height={20}
                     className="animate-spin h-5 w-5 object-contain"
                     alt="Loading"
                   />

@@ -14,6 +14,8 @@ import {
   FileText,
   Brain,
   Loader2,
+  AlertCircle,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +31,8 @@ import {
 import { MessageMetadata } from "./message-metadata";
 import { DownloadAttachmentCard } from "../ui/download-attachment-card";
 import { AVAILABLE_MODELS } from "@/constants/ai-config";
+import { AgentProgressViewer } from "./agent-progress";
+import { ApprovalActionCard } from "./approval-card";
 
 interface ChatMessageViewProps {
   message: ChatMessage;
@@ -184,6 +188,14 @@ export const ChatMessageView = ({
             )}
           >
             <span>{isAssistant ? "ACS AI Assistant" : userName}</span>
+            {isAssistant && message.usedMemory && (
+              <div className="group relative flex items-center">
+                <Brain className="w-3.5 h-3.5 text-purple-400 cursor-help" />
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block w-max bg-black/80 text-white text-[10px] px-2 py-1 rounded shadow-lg z-50 normal-case tracking-normal">
+                  Jawaban disesuaikan dengan preferensi Anda
+                </div>
+              </div>
+            )}
             <span className="opacity-30">•</span>
             <div className="flex items-center gap-1.5 font-mono opacity-60">
               <Clock className="w-2.5 h-2.5" />
@@ -193,6 +205,25 @@ export const ChatMessageView = ({
                     minute: "2-digit",
                   })
                 : "Just now"}
+              
+              {/* Confidence Score Badge */}
+              {isAssistant && message.confidence && (
+                <div className="ml-2 flex items-center gap-1 opacity-100">
+                  {message.confidence.level === "HIGH" ? (
+                    <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-200 gap-1 px-1.5 py-0 h-4 text-[9px] cursor-default">
+                      <Check className="w-2.5 h-2.5" /> High Confidence
+                    </Badge>
+                  ) : message.confidence.level === "MEDIUM" ? (
+                    <Badge variant="outline" className="bg-yellow-500/10 text-yellow-600 border-yellow-200 gap-1 px-1.5 py-0 h-4 text-[9px] cursor-default">
+                      <AlertCircle className="w-2.5 h-2.5" /> Medium Confidence
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="bg-red-500/10 text-red-600 border-red-200 gap-1 px-1.5 py-0 h-4 text-[9px] cursor-default">
+                      <XCircle className="w-2.5 h-2.5" /> Low Confidence
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -241,6 +272,8 @@ export const ChatMessageView = ({
               </div>
             ) : isAssistant ? (
               <div className="prose prose-purple prose-sm max-w-none dark:prose-invert">
+                {message.agentSteps && <AgentProgressViewer steps={message.agentSteps} />}
+                
                 {isProcessing && (!message.content || message.content === "") ? (
                   <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-muted-foreground bg-[var(--surface-variant)]/50 px-3 py-1.5 rounded-full w-max">
                     <span className="animate-spin w-3 h-3 border-2 border-primary border-t-transparent rounded-full"></span>
@@ -248,6 +281,14 @@ export const ChatMessageView = ({
                   </div>
                 ) : (
                   <MessageContentRouter message={message} isProcessing={isProcessing} />
+                )}
+
+                {message.pendingAction && (
+                  <ApprovalActionCard 
+                    actionId={message.pendingAction.id} 
+                    summary={message.pendingAction.summary} 
+                    initialStatus={message.pendingAction.status} 
+                  />
                 )}
               </div>
             ) : (
@@ -387,6 +428,16 @@ export const ChatMessageView = ({
               >
                 {getModelDisplayName(message.modelUsed)}
               </Badge>
+              {message.confidence && (
+                <div className="flex items-center gap-1">
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    message.confidence.level === "HIGH" ? "bg-green-500" :
+                    message.confidence.level === "MEDIUM" ? "bg-yellow-500" : "bg-red-500"
+                  )} />
+                  <span className="font-mono">{Math.round(message.confidence.overall * 100)}% Confidence</span>
+                </div>
+              )}
               {message.processingTime && (
                 <span className="font-mono">
                   {message.processingTime}ms processing time
@@ -489,7 +540,7 @@ const MessageContentRouter = ({ message, isProcessing }: { message: ChatMessage;
           )}
           
           {isProcessing && (isThinkingComplete || !thinkContent) ? (
-            <div className="flex items-center gap-2 font-semibold text-primary animate-pulse py-2">
+            <div className="flex items-center gap-2 font-semibold text-primary py-2">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Menyusun jawaban...</span>
             </div>
@@ -516,7 +567,7 @@ const MessageContentRouter = ({ message, isProcessing }: { message: ChatMessage;
           {hasVisualization && <VisualAnalysisContent message={message} />}
           
           {isProcessing && (isThinkingComplete || !thinkContent) ? (
-            <div className="flex items-center gap-2 font-semibold text-primary animate-pulse py-2">
+            <div className="flex items-center gap-2 font-semibold text-primary py-2">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Menyusun jawaban...</span>
             </div>

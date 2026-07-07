@@ -65,14 +65,8 @@ export const useRAG = () => {
       setUploadedFiles((prev) => [...prev, ...validFiles]);
 
       if (validFiles.length > 0) {
-        // Automatically upload valid files immediately
-        // We use setTimeout to ensure state is slightly settled, or we just pass validFiles
-        // Wait, uploadDocuments is already a function. We can just call it with validFiles.
-        // We need to suppress the exhaustive-deps warning since uploadDocuments depends on states
-        // but we can just use a timeout to call it outside the render cycle if needed.
-        setTimeout(() => {
-          uploadDocuments(validFiles);
-        }, 100);
+        // Files are now queued in uploadedFiles state.
+        // They will be explicitly uploaded when the user clicks Send.
       }
 
       if (fileInputRef.current) {

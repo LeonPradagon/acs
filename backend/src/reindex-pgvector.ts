@@ -87,7 +87,7 @@ async function main() {
       for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
         const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE);
         const embeddings = await Promise.all(
-          batch.map((chunk) => EmbeddingService.generateEmbedding(chunk)),
+          batch.map((chunk) => EmbeddingService.generateEmbedding(chunk.content)),
         );
 
         for (let j = 0; j < batch.length; j++) {
@@ -97,16 +97,17 @@ async function main() {
           const chunkRecord = await prisma.documentChunk.create({
             data: {
               documentId: doc.id,
-              content: batch[j],
-              chunkIndex: chunkIndex,
+              content: batch[j].content,
+              heading: batch[j].heading,
+              chunkIndex,
             },
           });
 
-          // Update embedding via raw SQL
-          const vectorStr = `[${embeddings[j].join(",")}]`;
+          // Insert vector using raw SQL
+          const vectorArray = `[${embeddings[j].join(",")}]`;
           await prisma.$executeRawUnsafe(
-            `UPDATE "DocumentChunk" SET "embedding" = $1::vector WHERE "id" = $2`,
-            vectorStr,
+            `UPDATE "DocumentChunk" SET embedding = $1::vector WHERE id = $2`,
+            vectorArray,
             chunkRecord.id,
           );
         }

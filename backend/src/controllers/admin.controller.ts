@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { prisma, esClient } from "../config/db";
+import { clearRagCache } from "../services/rag.service";
 
 // ==========================================
 // User Management Logic
@@ -188,6 +189,7 @@ export const getAllDocuments = async (req: Request, res: Response) => {
       include: {
         user: { select: { email: true, name: true } },
         division: { select: { name: true } },
+        embeddingJobs: { select: { status: true, progress: true } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -215,7 +217,7 @@ export const deleteDocument = async (req: Request, res: Response) => {
     // 0. Verify document exists
     const doc = await prisma.document.findUnique({
       where: { id },
-      select: { id: true, title: true },
+      select: { id: true, title: true, deletedAt: true },
     });
     if (!doc) {
       return res
@@ -223,40 +225,54 @@ export const deleteDocument = async (req: Request, res: Response) => {
         .json({ success: false, error: "Document not found." });
     }
 
-    // 1. Delete chunks from Elasticsearch (best-effort, don't block on failure)
-    let esDeletedCount = 0;
-    try {
-      const esResult = await esClient.deleteByQuery({
-        index: "documents",
-        refresh: true, // Ensure consistency immediately
-        query: { term: { database_id: id } },
+    if (doc.deletedAt) {
+      // Hard delete if already soft deleted
+      const pgChunkCount = await prisma.documentChunk.count({
+        where: { documentId: id },
       });
-      esDeletedCount = Number(esResult.deleted) || 0;
-      console.log(
-        `[Admin] Deleted ${esDeletedCount} ES chunks for doc: ${id} (${doc.title})`,
-      );
-    } catch (esErr: any) {
-      // ES might be down — log but don't fail the operation
-      console.warn(`[Admin] ES Cleanup warning for ${id}: ${esErr.message}`);
+      await prisma.document.delete({ where: { id } });
+      console.log(`[Admin] Hard deleted doc: ${id}`);
+    } else {
+      // Soft delete
+      await prisma.document.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      console.log(`[Admin] Soft deleted doc: ${id}`);
     }
-
-    // 2. Delete from PG — cascade will remove DocumentChunk vectors
-    const pgChunkCount = await prisma.documentChunk.count({
-      where: { documentId: id },
-    });
-    await prisma.document.delete({ where: { id } });
-
-    console.log(
-      `[Admin] Deleted doc ${id} (${doc.title}) — ${pgChunkCount} PG chunks, ${esDeletedCount} ES chunks`,
-    );
+    
     res.json({
       success: true,
-      message: "Document completely removed from Knowledge Base.",
-      details: {
-        pgChunksDeleted: pgChunkCount,
-        esChunksDeleted: esDeletedCount,
-      },
+      message: doc.deletedAt 
+        ? "Document permanently deleted." 
+        : "Document soft deleted.",
     });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const restoreDocument = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const doc = await prisma.document.findUnique({
+      where: { id },
+      select: { id: true, deletedAt: true },
+    });
+    
+    if (!doc) {
+      return res.status(404).json({ success: false, error: "Document not found." });
+    }
+    if (!doc.deletedAt) {
+      return res.status(400).json({ success: false, error: "Document is not deleted." });
+    }
+    
+    await prisma.document.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+    
+    res.json({ success: true, message: "Document restored successfully." });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -265,6 +281,115 @@ export const deleteDocument = async (req: Request, res: Response) => {
 // ==========================================
 // System Settings Logic
 // ==========================================
+// ==========================================
+// Knowledge Graph Logic
+// ==========================================
+
+export const getKnowledgeGraph = async (req: Request, res: Response) => {
+  try {
+    const nodes = await prisma.knowledgeGraphNode.findMany({ take: 100 });
+    const edges = await prisma.knowledgeGraphEdge.findMany({ take: 200 });
+    res.json({ success: true, data: { nodes, edges } });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ==========================================
+
+export const getSecurityLogs = async (req: Request, res: Response) => {
+  try {
+    const logs = await prisma.traceLog.findMany({
+      where: {
+        OR: [
+          { name: "Prompt Injection Detected" },
+          { name: "PII Masking Triggered" },
+        ]
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    res.json({ success: true, data: logs });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const getTraceLogs = async (req: Request, res: Response) => {
+  try {
+    const logs = await prisma.traceLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+    res.json({ success: true, data: logs });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ==========================================
+// Prompt Manager Logic
+// ==========================================
+
+export const getPrompts = async (req: Request, res: Response) => {
+  try {
+    const prompts = await prisma.promptVersion.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ success: true, data: prompts });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const savePrompt = async (req: Request, res: Response) => {
+  try {
+    const { name, content } = req.body;
+    
+    // Auto increment version
+    const lastPrompt = await prisma.promptVersion.findFirst({
+      where: { name },
+      orderBy: { version: "desc" },
+    });
+    
+    const version = lastPrompt ? lastPrompt.version + 1 : 1;
+    
+    const prompt = await prisma.promptVersion.create({
+      data: { name, content, version, isActive: false },
+    });
+    
+    res.json({ success: true, data: prompt });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const activatePrompt = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    const promptToActivate = await prisma.promptVersion.findUnique({ where: { id } });
+    if (!promptToActivate) {
+      return res.status(404).json({ success: false, error: "Prompt not found." });
+    }
+    
+    // Deactivate all other prompts with the same name
+    await prisma.promptVersion.updateMany({
+      where: { name: promptToActivate.name },
+      data: { isActive: false },
+    });
+    
+    // Activate the requested prompt
+    await prisma.promptVersion.update({
+      where: { id },
+      data: { isActive: true },
+    });
+    
+    res.json({ success: true, message: "Prompt activated successfully." });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 
 export const getSystemSettings = async (req: Request, res: Response) => {
   try {

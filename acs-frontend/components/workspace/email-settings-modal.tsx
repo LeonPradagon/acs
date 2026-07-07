@@ -54,12 +54,14 @@ export function EmailSettingsModal({ open, onOpenChange }: EmailSettingsModalPro
     if (open) {
       email.fetchStatus();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
     if (email.status.connected && open) {
       email.fetchInbox(1);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [email.status.connected, open]);
 
   const toggleSelect = (id: string) => {
@@ -108,7 +110,7 @@ export function EmailSettingsModal({ open, onOpenChange }: EmailSettingsModalPro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[750px] h-[80vh] flex flex-col p-6 bg-card border-border/60 shadow-2xl">
+      <DialogContent className="sm:max-w-[750px] w-[95vw] md:w-full max-h-[90vh] flex flex-col p-6 bg-card border-border/60 shadow-2xl overflow-hidden">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold flex items-center gap-2.5 text-foreground tracking-tight">
             <div className="p-2 bg-blue-500/10 rounded-lg">
@@ -118,7 +120,7 @@ export function EmailSettingsModal({ open, onOpenChange }: EmailSettingsModalPro
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden mt-2">
+        <div className="flex-1 overflow-y-auto mt-2 custom-scrollbar">
           {!email.status.connected ? (
             /* ============================================================
                NOT CONNECTED — Email + Password Login Form

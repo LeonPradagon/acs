@@ -42,13 +42,22 @@ export const loadSessionHistory = async (
   sessionId: string,
 ): Promise<ChatMessage[]> => {
   const res = await apiClient.get(`/api/chat/history/${sessionId}`);
-  return (res.data.data || []).map((m: any) => ({
-    id: m.id,
-    content: m.content,
-    role: m.role,
-    timestamp: new Date(m.createdAt),
-    files: m.files,
-  }));
+  return (res.data.data || []).map((m: any) => {
+    let files = m.files;
+    let images = undefined;
+    if (m.files && !Array.isArray(m.files) && (m.files.documents !== undefined || m.files.images !== undefined)) {
+      files = m.files.documents?.length > 0 ? m.files.documents : undefined;
+      images = m.files.images?.length > 0 ? m.files.images : undefined;
+    }
+    return {
+      id: m.id,
+      content: m.content,
+      role: m.role,
+      timestamp: new Date(m.createdAt),
+      files: files,
+      images: images,
+    };
+  });
 };
 
 // ===== Health =====
@@ -95,8 +104,8 @@ export const streamChatRequest = async (
   onToken: (token: string) => void,
   onSources?: (sources: any[]) => void,
   onStep?: (step: string) => void,
-  onDone?: (model: string) => void,
-  onError?: (message: string) => void,
+  onDone?: (model: string, confidence?: any) => void,
+  onError?: (error: string) => void,
   signal?: AbortSignal,
 ): Promise<void> => {
   const token =
@@ -114,8 +123,10 @@ export const streamChatRequest = async (
       model: options.model || "openai/gpt-oss-120b",
       sessionId: options.sessionId,
       files: options.files || [],
+      images: options.images || [],
       effortLevel: options.effortLevel,
       isThinking: options.isThinking,
+      isWebSearchEnabled: options.isWebSearchEnabled,
     }),
     signal,
   });
@@ -160,7 +171,7 @@ export const streamChatRequest = async (
                 });
                 break;
               case "done":
-                onDone?.(data.model);
+                onDone?.(data.model, data.confidence);
                 break;
               case "error":
                 onError?.(data.message);
@@ -192,7 +203,9 @@ export const processQuery = async (
   files?: any[],
   model?: string,
   effortLevel?: string,
-  isThinking?: boolean
+  isThinking?: boolean,
+  isWebSearchEnabled?: boolean,
+  images?: string[]
 ): Promise<ChatMessage> => {
   const startTime = Date.now();
 
@@ -202,11 +215,12 @@ export const processQuery = async (
       let sources: any[] = [];
       let attachments: any[] = [];
       let modelUsed = "openai/gpt-oss-120b";
+      let confidenceScore: any = undefined;
 
       streamChatRequest(
         userQuery,
         chatHistory,
-        { sessionId, files, model, effortLevel, isThinking, onAttachment: (att: any) => attachments.push(att) },
+        { sessionId, files, model, effortLevel, isThinking, isWebSearchEnabled, images, onAttachment: (att: any) => attachments.push(att) },
         (token) => {
           fullContent += token;
           onStreamToken(token);
@@ -217,8 +231,9 @@ export const processQuery = async (
         (step) => {
           onStep?.(step);
         },
-        (model) => {
+        (model, confidence) => {
           modelUsed = model;
+          confidenceScore = confidence;
           resolve({
             id: Date.now().toString(),
             content: fullContent,
@@ -227,6 +242,7 @@ export const processQuery = async (
             sources,
             attachments,
             modelUsed,
+            confidence: confidenceScore,
             processingTime: Date.now() - startTime,
           });
         },

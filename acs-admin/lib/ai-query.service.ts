@@ -42,13 +42,22 @@ export const loadSessionHistory = async (
   sessionId: string,
 ): Promise<ChatMessage[]> => {
   const res = await apiClient.get(`/api/chat/history/${sessionId}`);
-  return (res.data.data || []).map((m: any) => ({
-    id: m.id,
-    content: m.content,
-    role: m.role,
-    timestamp: new Date(m.createdAt),
-    files: m.files,
-  }));
+  return (res.data.data || []).map((m: any) => {
+    let files = m.files;
+    let images = undefined;
+    if (m.files && !Array.isArray(m.files) && (m.files.documents !== undefined || m.files.images !== undefined)) {
+      files = m.files.documents?.length > 0 ? m.files.documents : undefined;
+      images = m.files.images?.length > 0 ? m.files.images : undefined;
+    }
+    return {
+      id: m.id,
+      content: m.content,
+      role: m.role,
+      timestamp: new Date(m.createdAt),
+      files: files,
+      images: images,
+    };
+  });
 };
 
 // ===== Health =====
@@ -114,6 +123,7 @@ export const streamChatRequest = async (
       model: options.model || "openai/gpt-oss-120b",
       sessionId: options.sessionId,
       files: options.files || [],
+      images: options.images || [],
       effortLevel: options.effortLevel,
       isThinking: options.isThinking,
     }),
@@ -192,7 +202,8 @@ export const processQuery = async (
   files?: any[],
   model?: string,
   effortLevel?: string,
-  isThinking?: boolean
+  isThinking?: boolean,
+  images?: string[]
 ): Promise<ChatMessage> => {
   const startTime = Date.now();
 
@@ -206,7 +217,7 @@ export const processQuery = async (
       streamChatRequest(
         userQuery,
         chatHistory,
-        { sessionId, files, model, effortLevel, isThinking, onAttachment: (att: any) => attachments.push(att) },
+        { sessionId, files, model, effortLevel, isThinking, images, onAttachment: (att: any) => attachments.push(att) },
         (token) => {
           fullContent += token;
           onStreamToken(token);

@@ -13,14 +13,22 @@ export class ChatService {
     question: string,
     answer: string,
     files?: any[],
+    images?: string[],
   ) {
+    let combinedFiles: any = undefined;
+    if ((files && files.length > 0) || (images && images.length > 0)) {
+      combinedFiles = {
+        documents: files && files.length > 0 ? files : undefined,
+        images: images && images.length > 0 ? images : undefined,
+      };
+    }
     await prisma.$transaction([
       prisma.chatHistory.create({
         data: {
           sessionId,
           role: "user",
           content: question,
-          files: files && files.length > 0 ? files : undefined,
+          files: combinedFiles,
         },
       }),
       prisma.chatHistory.create({

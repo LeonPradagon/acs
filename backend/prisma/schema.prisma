@@ -39,20 +39,39 @@ model Document {
   clearanceLevel Int             @default(1)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+  
+  // Knowledge Lifecycle Management
+  version        Int             @default(1)
+  deletedAt      DateTime?       // Soft delete
+  checksum       String?         // Document hash for duplicate detection
+  lineage        Json?           // Tracing document origin/updates
+
   chunks         DocumentChunk[]
+  knowledgeGraphNodes KnowledgeGraphNode[]
+  embeddingJobs  EmbeddingJob[]
 }
 
 /// Stores individual text chunks with vector embeddings for pgvector search.
 /// The "embedding" column (vector(384)) is added via raw SQL migration.
 model DocumentChunk {
-  id         String   @id @default(uuid())
-  documentId String
-  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  content    String
-  chunkIndex Int
-  createdAt  DateTime @default(now())
-  embedding  Unsupported("vector(384)")?
+  id             String   @id @default(uuid())
+  documentId     String
+  content        String   @db.Text
+  chunkIndex     Int
+  
+  // Advanced Recursive Chunking Metadata
+  heading        String?  // Optional header of the section
+  pageNumber     Int?     // Optional page number
+  sectionPath    String?  // e.g. "Chapter 1 > Section 1.2"
+  checksum       String?  // Hash to prevent re-indexing unchanged chunks
+  
+  // Vector search uses pgvector via raw queries
+  embedding      Unsupported("vector(384)")?
+  
+  createdAt      DateTime @default(now())
 
+  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
   @@index([documentId])
 }
 
@@ -64,6 +83,7 @@ model ChatSession {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   messages      ChatHistory[]
+  summaries     ConversationSummary[]
 
   @@index([userId])
 }
@@ -148,12 +168,152 @@ model ErpSalary {
 }
 
 model TokenUsage {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokens    Int
-  model     String?
-  createdAt DateTime @default(now())
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens          Int      // Total tokens
+  promptTokens    Int      @default(0)
+  completionTokens Int     @default(0)
+  model           String?
+  createdAt       DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+model PromptVersion {
+  id        String   @id @default(uuid())
+  name      String   // e.g., "SYSTEM_PROMPT", "RAG_PROMPT"
+  version   Int      // e.g., 1, 2, 3
+  content   String   @db.Text
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([name, version])
+}
+
+model TraceLog {
+  id        String   @id @default(uuid())
+  traceId   String   @db.VarChar(100)
+  spanId    String   @db.VarChar(100)
+  parentId  String?  @db.VarChar(100)
+  name      String   // e.g., "HTTP GET /chat", "LLM Invoke", "DB Query"
+  status    String   // "SUCCESS", "ERROR"
+  durationMs Int
+  metadata  Json?
+  error     String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([traceId])
+  @@index([createdAt])
+  @@index([name])
+}
+
+model SystemMetrics {
+  id        String   @id @default(uuid())
+  name      String   // e.g., "latency_avg", "error_rate", "active_users"
+  value     Float
+  unit      String   // e.g., "ms", "%", "count"
+  timestamp DateTime @default(now())
+
+  @@index([name, timestamp])
+}
+
+model EvaluationResult {
+  id              String   @id @default(uuid())
+  chatSessionId   String?
+  question        String   @db.Text
+  answer          String   @db.Text
+  contextUsed     Json?
+  relevancyScore  Float    // 0.0 to 1.0
+  faithfulness    Float    // 0.0 to 1.0
+  feedback        String?  @db.Text
+  modelUsed       String   // e.g. "gpt-oss:120b-cloud"
+  createdAt       DateTime @default(now())
+
+  @@index([chatSessionId])
+  @@index([createdAt])
+}
+
+// ============================================================
+// Phase 3: AI Memory Models
+// ============================================================
+
+/// Stores a condensed summary of past conversations to provide long-term context
+model ConversationSummary {
+  id          String   @id @default(uuid())
+  sessionId   String
+  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  summary     String   @db.Text
+  createdAt   DateTime @default(now())
+  
+  @@index([sessionId])
+}
+
+/// Stores extracted entities (names, organizations, specific facts) linked to a user/session
+model EntityMemory {
+  id          String   @id @default(uuid())
+  userId      String?
+  entityType  String   // e.g. "PERSON", "ORGANIZATION", "PROJECT", "PREFERENCE"
+  entityName  String
+  entityValue String   @db.Text
+  confidence  Float    @default(1.0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+}
+
+// ============================================================
+// Phase 3: Knowledge Graph (Graph RAG)
+// ============================================================
+
+model KnowledgeGraphNode {
+  id          String   @id @default(uuid())
+  documentId  String?
+  document    Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  entityType  String   // e.g. "PERSON", "PROJECT", "TECHNOLOGY"
+  entityName  String   @unique
+  properties  Json?
+  createdAt   DateTime @default(now())
+  
+  sourceEdges KnowledgeGraphEdge[] @relation("SourceNode")
+  targetEdges KnowledgeGraphEdge[] @relation("TargetNode")
+  
+  @@index([documentId])
+  @@index([entityName])
+}
+
+model KnowledgeGraphEdge {
+  id           String   @id @default(uuid())
+  sourceNodeId String
+  targetNodeId String
+  relationType String   // e.g. "WORKS_FOR", "DEPENDS_ON", "IMPLEMENTED_IN"
+  properties   Json?
+  createdAt    DateTime @default(now())
+
+  sourceNode   KnowledgeGraphNode @relation("SourceNode", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode   KnowledgeGraphNode @relation("TargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceNodeId, targetNodeId, relationType])
+  @@index([sourceNodeId])
+  @@index([targetNodeId])
+}
+
+// ============================================================
+// Phase 3: Knowledge Lifecycle Management
+// ============================================================
+
+model EmbeddingJob {
+  id          String   @id @default(uuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  status      String   @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  progress    Int      @default(0)
+  error       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([documentId])
+  @@index([status])
 }
