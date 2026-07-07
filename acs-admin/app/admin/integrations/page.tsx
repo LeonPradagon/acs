@@ -12,11 +12,14 @@ export default function IntegrationsCMSPage() {
   const [dbUrl, setDbUrl] = useState("");
   const [apiUrl, setApiUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [dbSchema, setDbSchema] = useState("");
+  const [apiSchema, setApiSchema] = useState("");
   const [testStatus, setTestStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [testMessage, setTestMessage] = useState("");
 
   useEffect(() => {
     adminInfo.fetchSystemSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -25,6 +28,8 @@ export default function IntegrationsCMSPage() {
       setDbUrl(adminInfo.settings.ERP_DB_URL || "");
       setApiUrl(adminInfo.settings.ERP_API_BASE_URL || "");
       setApiKey(adminInfo.settings.ERP_API_KEY || "");
+      setDbSchema(adminInfo.settings.ERP_DB_SCHEMA_DOC || "");
+      setApiSchema(adminInfo.settings.ERP_API_SCHEMA_DOC || "");
     }
   }, [adminInfo.settings]);
 
@@ -52,9 +57,11 @@ export default function IntegrationsCMSPage() {
     await adminInfo.updateSystemSetting("ERP_CONNECTION_MODE", mode);
     if (mode === "DB") {
       await adminInfo.updateSystemSetting("ERP_DB_URL", dbUrl);
+      await adminInfo.updateSystemSetting("ERP_DB_SCHEMA_DOC", dbSchema);
     } else {
       await adminInfo.updateSystemSetting("ERP_API_BASE_URL", apiUrl);
       await adminInfo.updateSystemSetting("ERP_API_KEY", apiKey);
+      await adminInfo.updateSystemSetting("ERP_API_SCHEMA_DOC", apiSchema);
     }
     setTestStatus("idle");
     setTestMessage("Settings saved successfully.");
@@ -134,6 +141,15 @@ export default function IntegrationsCMSPage() {
                     </div>
                     <p className="text-[12px] text-muted-foreground mt-2 ml-1">Leave empty to use the built-in mock database for sandbox testing.</p>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-[13px] font-bold uppercase tracking-wider text-muted-foreground">Database Schema Documentation</label>
+                    <textarea 
+                      placeholder="e.g. Table: employees (id, name, role), Table: salaries (id, amount)"
+                      className="w-full bg-background/50 border border-border text-sm rounded-xl p-4 min-h-[120px] outline-none focus:ring-2 ring-indigo-500/50 transition-all font-mono custom-scrollbar"
+                      value={dbSchema}
+                      onChange={(e) => setDbSchema(e.target.value)}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -167,6 +183,15 @@ export default function IntegrationsCMSPage() {
                         onChange={(e) => setApiKey(e.target.value)}
                       />
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[13px] font-bold uppercase tracking-wider text-muted-foreground">API Documentation (Swagger / Markdown)</label>
+                    <textarea 
+                      placeholder="e.g. GET /api/v1/employees?status=ACTIVE"
+                      className="w-full bg-background/50 border border-border text-sm rounded-xl p-4 min-h-[120px] outline-none focus:ring-2 ring-indigo-500/50 transition-all font-mono custom-scrollbar"
+                      value={apiSchema}
+                      onChange={(e) => setApiSchema(e.target.value)}
+                    />
                   </div>
                 </div>
               )}

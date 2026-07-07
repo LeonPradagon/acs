@@ -72,7 +72,7 @@ Jika pengguna adalah Global, LLM dapat menanyakan seluruh karyawan.
   let systemPrompt = await PromptService.getActivePrompt("SYSTEM_PROMPT", fallbackTemplate);
 
   systemPrompt = systemPrompt.replace("{{ERP_FUNCTION}}", erpMode === 'DB' ? 'query_erp_sql' : 'query_erp_api');
-  systemPrompt = systemPrompt.replace("{{ERP_SCHEMA}}", erpMode === 'DB' ? ErpService.getErpSchemaInfo() : ErpService.getErpApiInfo());
+  systemPrompt = systemPrompt.replace("{{ERP_SCHEMA}}", erpMode === 'DB' ? await ErpService.getErpSchemaInfo() : await ErpService.getErpApiInfo());
   systemPrompt = systemPrompt.replace("{{USER_DIVISION}}", currentUserDivision || "Global/Superadmin");
   systemPrompt = systemPrompt.replace("{{ERP_RULES}}", erpMode === 'DB' ? `otomatis gunakan klausa WHERE divisionName = '${currentUserDivision || "SEMUA"}' dalam query_erp_sql Anda.` : `tambahkan query parameter divisionName='${currentUserDivision}' di dalam argumen queryParams json.`);
   

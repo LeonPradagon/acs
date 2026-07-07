@@ -21,6 +21,8 @@ interface AnalyticsData {
   topQuestions: { question: string; count: number }[];
 }
 
+import apiClient from "@/lib/api-client";
+
 export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,19 +30,8 @@ export default function AnalyticsPage() {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const token = localStorage.getItem("acs_admin_token");
-        const res = await fetch("http://localhost:5000/api/admin/analytics", {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        
-        if (!res.ok) {
-          throw new Error("Gagal mengambil data analytics");
-        }
-        
-        const json = await res.json();
-        setData(json.data);
+        const res = await apiClient.get("/api/admin/analytics");
+        setData(res.data?.data);
       } catch (err: any) {
         console.error("Failed to fetch real analytics:", err);
         // Error will result in data remaining null, showing "Data tidak tersedia"

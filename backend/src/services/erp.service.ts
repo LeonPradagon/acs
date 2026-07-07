@@ -42,7 +42,12 @@ export class ErpService {
   /**
    * Returns the database schema description of the ERP to be injected into the LLM prompt.
    */
-  static getErpSchemaInfo(): string {
+  static async getErpSchemaInfo(): Promise<string> {
+    const customSchema = await prisma.systemSetting.findUnique({ where: { key: "ERP_DB_SCHEMA_DOC" } });
+    if (customSchema && customSchema.value) {
+      return customSchema.value;
+    }
+    
     return `
     Database ERP Schema (Read-Only PostgreSQL/Mock):
 
@@ -197,7 +202,12 @@ export class ErpService {
   /**
    * Returns the REST API documentation of the ERP to be injected into the LLM prompt.
    */
-  static getErpApiInfo(): string {
+  static async getErpApiInfo(): Promise<string> {
+    const customSchema = await prisma.systemSetting.findUnique({ where: { key: "ERP_API_SCHEMA_DOC" } });
+    if (customSchema && customSchema.value) {
+      return customSchema.value;
+    }
+
     return `
     Enterprise REST API Documentation (Version 1.0):
 
