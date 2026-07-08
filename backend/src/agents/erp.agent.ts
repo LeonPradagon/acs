@@ -2,6 +2,8 @@ import { AgentContext, AgentResult } from "./types";
 import { ErpService } from "../services/erp.service";
 import { ChatOpenAI } from "@langchain/openai";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
+import { DynamicStructuredTool } from "@langchain/core/tools";
+import { z } from "zod";
 import { env } from "../common/env";
 
 export class ErpAgent {
@@ -18,7 +20,23 @@ export class ErpAgent {
         maxRetries: 1,
       });
 
-      const tools = ErpService.getErpTools();
+      const tools = [
+        new DynamicStructuredTool({
+          name: "query_erp_sql",
+          description: "Execute a READ-ONLY PostgreSQL query against the Mock ERP Database to retrieve accurate structured data.",
+          schema: z.object({
+            sql_query: z.string().describe("The PostgreSQL SELECT query to execute."),
+          }),
+          func: async ({ sql_query }) => {
+            try {
+              const result = await ErpService.executeReadOnlySQL(sql_query);
+              return JSON.stringify(result, (key, value) => typeof value === 'bigint' ? value.toString() : value);
+            } catch (err: any) {
+              return JSON.stringify({ error: err.message });
+            }
+          },
+        })
+      ];
       const llmWithTools = llm.bindTools(tools);
 
       const systemPrompt = `You are an ERP Agent.
@@ -42,10 +60,10 @@ Analyze the query, call the appropriate tool, and return the raw data retrieved.
       if (response.tool_calls && response.tool_calls.length > 0) {
         toolCalled = true;
         const toolCall = response.tool_calls[0]; // execute first tool
-        const tool = tools.find(t => t.name === toolCall.name);
+        const tool = tools.find((t: DynamicStructuredTool) => t.name === toolCall.name);
         if (tool) {
           console.log(`[ErpAgent] Executing tool: ${tool.name}`);
-          rawData = await tool.invoke(toolCall.args);
+          rawData = await tool.invoke(toolCall);
         }
       }
 

@@ -7,7 +7,8 @@ export class EmailAgent {
     try {
       // In a real implementation, we might extract search terms from the query.
       // For now, let's just do a basic search using the raw query or just fetch recent emails.
-      const emails = await EmailService.searchEmails(context.userId, context.query, 5);
+      const result = await EmailService.getInbox(context.userId, 1, 5);
+      const emails = result.messages;
 
       return {
         agentName: "email",

@@ -6,8 +6,8 @@ export class EvaluatorAgent {
     const startTime = Date.now();
     try {
       // Evaluate relevancy and faithfulness using LLM-as-a-judge
-      const result = await EvaluationService.evaluateResponse(
-        null, // sessionId not strictly needed for the raw eval
+      const result = await EvaluationService.evaluateResponseAsync(
+        undefined, // sessionId not strictly needed for the raw eval
         query,
         responseText,
         contextUsed
