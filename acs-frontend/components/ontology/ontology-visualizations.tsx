@@ -232,8 +232,8 @@ export const D3OntologyVisualization = ({
       .select(svgRef.current)
       .attr("width", dimensions.width)
       .attr("height", dimensions.height)
-      .style("background", "linear-gradient(to bottom right, #f0f4ff, #faf5ff)")
-      .style("border-radius", "8px");
+      .style("background", "transparent")
+      .style("border-radius", "0.75rem");
 
     // Create container for zoomable content
     const g = svg.append("g");
@@ -291,12 +291,14 @@ export const D3OntologyVisualization = ({
     // Create edges
     const link = g
       .append("g")
-      .selectAll("line")
+      .selectAll("path")
       .data(edgesWithNodes)
       .enter()
-      .append("line")
+      .append("path")
+      .attr("fill", "none")
       .attr("stroke", (d: OntologyEdge) => getEdgeColor(d.type))
       .attr("stroke-width", (d: OntologyEdge) => getEdgeWidth(d.confidence))
+      .attr("stroke-opacity", 0.6)
       .attr("stroke-dasharray", (d: OntologyEdge) =>
         d.confidence && d.confidence < 0.5 ? "5,5" : "none"
       )
@@ -304,11 +306,33 @@ export const D3OntologyVisualization = ({
         d.type !== "related_to" ? "url(#arrow)" : null
       )
       .style("cursor", "pointer")
+      .style("transition", "stroke-opacity 0.2s, stroke-width 0.2s")
+      .on("mouseover", function() {
+        d3.select(this).attr("stroke-opacity", 1).attr("stroke-width", (d: any) => getEdgeWidth(d.confidence) + 1);
+      })
+      .on("mouseout", function() {
+        d3.select(this).attr("stroke-opacity", 0.6).attr("stroke-width", (d: any) => getEdgeWidth(d.confidence));
+      })
       .on("click", (event, d: any) => {
         event.stopPropagation();
         setSelectedEdge(d);
         setSelectedNode(null);
       });
+
+    // Flowing particles overlay
+    const flowingLink = g
+      .append("g")
+      .selectAll("path")
+      .data(edgesWithNodes)
+      .enter()
+      .append("path")
+      .attr("fill", "none")
+      .attr("stroke", (d: OntologyEdge) => getEdgeColor(d.type))
+      .attr("stroke-width", 2)
+      .attr("stroke-dasharray", "4,8")
+      .attr("opacity", 0.8)
+      .style("pointer-events", "none")
+      .classed("edge-flow", true);
 
     // Create edge labels
     const edgeLabels = g
@@ -334,10 +358,11 @@ export const D3OntologyVisualization = ({
       .append("circle")
       .attr("r", (d: OntologyNode) => getNodeSize(d.confidence))
       .attr("fill", (d: OntologyNode) => getNodeColor(d.type))
-      .attr("stroke", "#fff")
-      .attr("stroke-width", 2)
+      .attr("stroke", "#ffffff")
+      .attr("stroke-width", 2.5)
       .style("cursor", "pointer")
-      .style("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.1))")
+      .style("filter", "drop-shadow(0 4px 6px rgba(0,0,0,0.15))")
+      .style("transition", "filter 0.2s")
       .call(
         d3
           .drag<SVGCircleElement, OntologyNode>()
@@ -365,13 +390,15 @@ export const D3OntologyVisualization = ({
         d3.select(this)
           .transition()
           .duration(200)
-          .attr("r", getNodeSize(d.confidence) + 3);
+          .attr("r", getNodeSize(d.confidence) + 4)
+          .style("filter", "drop-shadow(0 6px 12px rgba(0,0,0,0.3))");
       })
       .on("mouseout", function (event, d) {
         d3.select(this)
           .transition()
           .duration(200)
-          .attr("r", getNodeSize(d.confidence));
+          .attr("r", getNodeSize(d.confidence))
+          .style("filter", "drop-shadow(0 4px 6px rgba(0,0,0,0.15))");
       });
 
     // Create node labels
@@ -392,15 +419,21 @@ export const D3OntologyVisualization = ({
 
     // Update positions on simulation tick
     simulation.on("tick", () => {
-      link
-        .attr("x1", (d: any) => d.source.x)
-        .attr("y1", (d: any) => d.source.y)
-        .attr("x2", (d: any) => d.target.x)
-        .attr("y2", (d: any) => d.target.y);
+      // Use quadratic bezier curve for edges
+      const getPath = (d: any) => {
+        const dx = d.target.x - d.source.x;
+        const dy = d.target.y - d.source.y;
+        const dr = Math.sqrt(dx * dx + dy * dy);
+        // Straight line if distance is small, otherwise slight curve
+        return `M${d.source.x},${d.source.y} Q${(d.source.x + d.target.x) / 2 + dy * 0.1},${(d.source.y + d.target.y) / 2 - dx * 0.1} ${d.target.x},${d.target.y}`;
+      };
+
+      link.attr("d", getPath);
+      flowingLink.attr("d", getPath);
 
       edgeLabels
-        .attr("x", (d: any) => (d.source.x + d.target.x) / 2)
-        .attr("y", (d: any) => (d.source.y + d.target.y) / 2 - 10);
+        .attr("x", (d: any) => (d.source.x + d.target.x) / 2 + (d.target.y - d.source.y) * 0.05)
+        .attr("y", (d: any) => (d.source.y + d.target.y) / 2 - (d.target.x - d.source.x) * 0.05 - 10);
 
       node.attr("cx", (d: any) => d.x).attr("cy", (d: any) => d.y);
 
@@ -505,7 +538,16 @@ export const D3OntologyVisualization = ({
       </div>
 
       {/* Visualization Container */}
-      <div className="relative bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border-2 border-dashed border-indigo-200 overflow-hidden">
+      <div className="relative bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-inner min-h-[400px]">
+        <style dangerouslySetInnerHTML={{__html: `
+          @keyframes flow {
+            from { stroke-dashoffset: 24; }
+            to { stroke-dashoffset: 0; }
+          }
+          .edge-flow {
+            animation: flow 1s linear infinite;
+          }
+        `}} />
         <svg
           ref={svgRef}
           className="w-full h-96 cursor-move"
@@ -516,8 +558,8 @@ export const D3OntologyVisualization = ({
         />
 
         {/* Legend */}
-        <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur-sm rounded-lg p-3 text-xs shadow-sm border">
-          <div className="font-medium mb-2 text-sm">Node Types:</div>
+        <div className="absolute bottom-3 left-3 bg-white/70 dark:bg-slate-950/70 backdrop-blur-md rounded-lg p-3 text-xs shadow-sm border border-slate-200 dark:border-slate-800 z-10 transition-all hover:bg-white/90">
+          <div className="font-semibold mb-2 text-sm text-slate-800 dark:text-slate-200">Node Types</div>
           <div className="space-y-1">
             {Array.from(new Set(nodes.map((n: any) => n.type)))
               .slice(0, 5)
@@ -537,9 +579,9 @@ export const D3OntologyVisualization = ({
         </div>
 
         {/* Instructions */}
-        <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm rounded-lg p-2 text-xs shadow-sm border">
-          <div className="space-y-1">
-            <div className="flex items-center gap-1">
+        <div className="absolute top-3 left-3 bg-white/70 dark:bg-slate-950/70 backdrop-blur-md rounded-lg p-2 text-xs shadow-sm border border-slate-200 dark:border-slate-800 z-10">
+          <div className="space-y-1 text-slate-600 dark:text-slate-400">
+            <div className="flex items-center gap-1 text-slate-800 dark:text-slate-200">
               <span className="font-medium">Interaksi:</span>
             </div>
             <div>• Drag untuk memindahkan node</div>
@@ -549,193 +591,163 @@ export const D3OntologyVisualization = ({
         </div>
       </div>
 
-      {/* Node Details Panel */}
-      {selectedNode && (
-        <Card className="bg-blue-50 border-blue-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center justify-between">
-              <span>Node Details</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedNode(null)}
-                className="h-6 w-6 p-0"
-              >
-                <X className="w-3 h-3" />
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <strong className="text-blue-700">Label:</strong>
-                  <div className="mt-1 font-medium">
-                    {renderSafeProperty(selectedNode.label)}
-                  </div>
-                </div>
-                <div>
-                  <strong className="text-blue-700">Type:</strong>
-                  <div className="mt-1 capitalize">
-                    {renderSafeProperty(selectedNode.type)}
-                  </div>
-                </div>
-                <div>
-                  <strong className="text-blue-700">Confidence:</strong>
-                  <div className="mt-1">
-                    {selectedNode.confidence
-                      ? `${(selectedNode.confidence * 100).toFixed(1)}%`
-                      : "N/A"}
-                  </div>
-                </div>
-                <div>
-                  <strong className="text-blue-700">ID:</strong>
-                  <div className="mt-1 font-mono text-xs">
-                    {renderSafeProperty(selectedNode.id)}
-                  </div>
-                </div>
+        {/* Sliding Drawer for Node Details */}
+        <div
+          className={`absolute right-0 top-0 bottom-0 w-80 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-l border-slate-200 dark:border-slate-800 shadow-2xl transition-transform duration-300 ease-in-out z-20 flex flex-col ${
+            selectedNode || selectedEdge ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          {selectedNode && (
+            <>
+              <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
+                <span className="font-semibold text-slate-800 dark:text-slate-200">Node Details</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSelectedNode(null)}
+                  className="h-8 w-8 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
               </div>
-
-              {selectedNode.categories &&
-                selectedNode.categories.length > 0 && (
+              <div className="p-4 overflow-y-auto flex-1 space-y-4 text-sm text-slate-600 dark:text-slate-300">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <strong className="text-blue-700">Categories:</strong>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {selectedNode.categories.map(
-                        (cat: string, idx: number) => (
-                          <Badge
-                            key={idx}
-                            variant="secondary"
-                            className="text-xs"
-                          >
-                            {cat}
-                          </Badge>
-                        )
-                      )}
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Label</strong>
+                    <div className="font-medium bg-slate-100 dark:bg-slate-900 p-2 rounded-md">
+                      {renderSafeProperty(selectedNode.label)}
+                    </div>
+                  </div>
+                  <div>
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Type</strong>
+                    <div className="capitalize bg-slate-100 dark:bg-slate-900 p-2 rounded-md">
+                      {renderSafeProperty(selectedNode.type)}
+                    </div>
+                  </div>
+                  <div>
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Confidence</strong>
+                    <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded-md">
+                      {selectedNode.confidence
+                        ? `${(selectedNode.confidence * 100).toFixed(1)}%`
+                        : "N/A"}
+                    </div>
+                  </div>
+                  <div>
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">ID</strong>
+                    <div className="font-mono text-xs bg-slate-100 dark:bg-slate-900 p-2 rounded-md truncate" title={selectedNode.id}>
+                      {renderSafeProperty(selectedNode.id)}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedNode.categories &&
+                  selectedNode.categories.length > 0 && (
+                  <div>
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Categories</strong>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedNode.categories.map((cat: string, idx: number) => (
+                        <Badge key={idx} variant="secondary" className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-none">
+                          {cat}
+                        </Badge>
+                      ))}
                     </div>
                   </div>
                 )}
 
-              {/* Connected edges */}
-              <div>
-                <strong className="text-blue-700">Connections:</strong>
-                <div className="mt-1 space-y-1">
-                  {data.analysis?.graph?.edges
-                    .filter(
-                      (edge: any) =>
-                        edge.source === selectedNode.id ||
-                        edge.target === selectedNode.id
-                    )
-                    .slice(0, 5)
-                    .map((edge: any, idx: number) => {
-                      const otherNodeId =
-                        edge.source === selectedNode.id
-                          ? edge.target
-                          : edge.source;
-                      const otherNode = data.analysis?.graph?.nodes.find(
-                        (n: any) => n.id === otherNodeId
-                      );
-                      return (
-                        <div
-                          key={idx}
-                          className="flex items-center gap-2 text-xs"
-                        >
-                          <div
-                            className="w-2 h-2 rounded-full"
-                            style={{ backgroundColor: getEdgeColor(edge.type) }}
-                          ></div>
-                          <span className="capitalize">{edge.type}</span>
-                          <span>→</span>
-                          <span className="font-medium">
-                            {otherNode?.label || String(otherNodeId)}
-                          </span>
-                        </div>
-                      );
-                    })}
+                {/* Connected edges */}
+                <div>
+                  <strong className="text-slate-900 dark:text-slate-100 block mb-1">Connections</strong>
+                  <div className="space-y-2">
+                    {data.analysis?.graph?.edges
+                      .filter((edge: any) => edge.source === selectedNode.id || edge.target === selectedNode.id)
+                      .slice(0, 5)
+                      .map((edge: any, idx: number) => {
+                        const otherNodeId = edge.source === selectedNode.id ? edge.target : edge.source;
+                        const otherNode = data.analysis?.graph?.nodes.find((n: any) => n.id === otherNodeId);
+                        return (
+                          <div key={idx} className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-900 rounded-md border border-slate-100 dark:border-slate-800">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: getEdgeColor(edge.type) }}></div>
+                            <span className="capitalize">{edge.type}</span>
+                            <span className="text-slate-400">→</span>
+                            <span className="font-medium truncate">{otherNode?.label || String(otherNodeId)}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
                 </div>
-              </div>
 
-              {selectedNode.metadata &&
-                Object.keys(selectedNode.metadata).length > 0 && (
+                {selectedNode.metadata && Object.keys(selectedNode.metadata).length > 0 && (
                   <div>
-                    <strong className="text-blue-700">Metadata:</strong>
-                    <pre className="text-xs mt-1 p-2 bg-white rounded border max-h-32 overflow-auto">
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Metadata</strong>
+                    <pre className="p-3 bg-slate-900 text-slate-300 rounded-md overflow-x-auto text-xs font-mono shadow-inner">
                       {JSON.stringify(selectedNode.metadata, null, 2)}
                     </pre>
                   </div>
                 )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Edge Details Panel */}
-      {selectedEdge && (
-        <Card className="bg-green-50 border-green-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center justify-between">
-              <span>Relationship Details</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedEdge(null)}
-                className="h-6 w-6 p-0"
-              >
-                <X className="w-3 h-3" />
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <strong className="text-green-700">Type:</strong>
-                  <div className="mt-1 capitalize">
-                    {renderSafeProperty(selectedEdge.type)}
-                  </div>
-                </div>
-                <div>
-                  <strong className="text-green-700">Confidence:</strong>
-                  <div className="mt-1">
-                    {selectedEdge.confidence
-                      ? `${(selectedEdge.confidence * 100).toFixed(1)}%`
-                      : "N/A"}
-                  </div>
-                </div>
-                <div>
-                  <strong className="text-green-700">Source:</strong>
-                  <div className="mt-1 font-medium">
-                    {renderSafeProperty(selectedEdge.source)}
-                  </div>
-                </div>
-                <div>
-                  <strong className="text-green-700">Target:</strong>
-                  <div className="mt-1 font-medium">
-                    {renderSafeProperty(selectedEdge.target)}
-                  </div>
-                </div>
               </div>
+            </>
+          )}
 
-              {selectedEdge.label && (
-                <div>
-                  <strong className="text-green-700">Label:</strong>
-                  <div className="mt-1">{selectedEdge.label}</div>
-                </div>
-              )}
-
-              {selectedEdge.metadata &&
-                Object.keys(selectedEdge.metadata).length > 0 && (
+          {selectedEdge && (
+            <>
+              <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
+                <span className="font-semibold text-slate-800 dark:text-slate-200">Edge Details</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSelectedEdge(null)}
+                  className="h-8 w-8 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1 space-y-4 text-sm text-slate-600 dark:text-slate-300">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <strong className="text-green-700">Metadata:</strong>
-                    <pre className="text-xs mt-1 p-2 bg-white rounded border max-h-32 overflow-auto">
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Type</strong>
+                    <div className="capitalize bg-slate-100 dark:bg-slate-900 p-2 rounded-md">
+                      {renderSafeProperty(selectedEdge.type)}
+                    </div>
+                  </div>
+                  <div>
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Confidence</strong>
+                    <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded-md">
+                      {selectedEdge.confidence ? `${(selectedEdge.confidence * 100).toFixed(1)}%` : "N/A"}
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Source</strong>
+                    <div className="font-medium bg-slate-100 dark:bg-slate-900 p-2 rounded-md truncate">
+                      {renderSafeProperty(selectedEdge.source)}
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Target</strong>
+                    <div className="font-medium bg-slate-100 dark:bg-slate-900 p-2 rounded-md truncate">
+                      {renderSafeProperty(selectedEdge.target)}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedEdge.label && (
+                  <div>
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Label</strong>
+                    <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded-md">{selectedEdge.label}</div>
+                  </div>
+                )}
+
+                {selectedEdge.metadata && Object.keys(selectedEdge.metadata).length > 0 && (
+                  <div>
+                    <strong className="text-slate-900 dark:text-slate-100 block mb-1">Metadata</strong>
+                    <pre className="p-3 bg-slate-900 text-slate-300 rounded-md overflow-x-auto text-xs font-mono shadow-inner">
                       {JSON.stringify(selectedEdge.metadata, null, 2)}
                     </pre>
                   </div>
                 )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+              </div>
+            </>
+          )}
+        </div>
 
       {/* Graph Statistics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

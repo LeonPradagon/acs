@@ -49,6 +49,7 @@ export const env = {
   // AI Services
   OLLAMA_API_KEY: requireEnv("OLLAMA_API_KEY"),
   LLAMAPARSE_API_KEY: process.env.LLAMAPARSE_API_KEY || "",
+  TAVILY_API_KEY: optionalEnv("TAVILY_API_KEY", ""),
   
   // Onyx AI
   ONYX_API_KEY: process.env.ONYX_API_KEY || "",
@@ -56,6 +57,9 @@ export const env = {
 
   // Document Extractor
   TIKA_URL: optionalEnv("TIKA_URL", "http://localhost:9998"),
+
+  // Headless API Integration
+  INTEGRATION_API_KEY: optionalEnv("INTEGRATION_API_KEY", ""),
 
   // Microsoft Email OAuth (Outlook Integration)
   MICROSOFT_CLIENT_ID: optionalEnv("MICROSOFT_CLIENT_ID", ""),

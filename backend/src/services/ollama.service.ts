@@ -82,6 +82,29 @@ Jika pengguna adalah Global, LLM dapat menanyakan seluruh karyawan.
   
   systemPrompt = systemPrompt.replace("{{CONTEXT}}", contextReplacement);
 
+  const visualAnalysisRules = `
+<visual_analysis>
+Jika pengguna meminta data disajikan dalam bentuk chart/grafik, Anda WAJIB merespons HANYA dengan blok JSON (tanpa teks lain) menggunakan format berikut:
+\`\`\`json
+{
+  "type": "visual_analysis",
+  "visualization": {
+    "type": "bar_chart", // HANYA PILIH DARI: bar_chart, line_chart, pie_chart, network, swot
+    "title": "Judul Chart",
+    "data": [
+      { "label": "Item A", "value": 100 }
+    ]
+  }
+}
+\`\`\`
+ATURAN KETAT VISUALISASI:
+1. Pastikan data berasal DARI KONTEKS YANG ADA atau HASIL TOOL. JANGAN PERNAH mengarang data (No Hallucination). Jika data spesifik tidak ada, tolak permintaan pembuatan chart.
+2. Untuk analisis SWOT, pastikan struktur data "data" tepat seperti ini: {"strengths": ["..."], "weaknesses": ["..."], "opportunities": ["..."], "threats": ["..."]}
+</visual_analysis>
+`;
+
+  systemPrompt = systemPrompt + "\n" + visualAnalysisRules;
+
   return systemPrompt;
 };
 
@@ -271,6 +294,33 @@ export const getUniversalResponse = async (
       const jsonMatch = outputContent.match(/```json\n([\s\S]*?)\n```/);
       if (jsonMatch && jsonMatch[1]) {
         const parsed = JSON.parse(jsonMatch[1]);
+        
+        // Strict Validation for visual_analysis
+        if (parsed.type === "visual_analysis") {
+          const validTypes = ["bar_chart", "line_chart", "pie_chart", "network", "swot"];
+          if (parsed.visualization && !validTypes.includes(parsed.visualization.type)) {
+             // Fallback to bar_chart if hallucinated
+             parsed.visualization.type = "bar_chart";
+          }
+          // Specific SWOT enforcement
+          if (parsed.visualization?.type === "swot") {
+            const swotSchema = z.object({
+              strengths: z.array(z.string()).default([]),
+              weaknesses: z.array(z.string()).default([]),
+              opportunities: z.array(z.string()).default([]),
+              threats: z.array(z.string()).default([]),
+            }).passthrough();
+            
+            const swotParsed = swotSchema.safeParse(parsed.visualization.data);
+            if (swotParsed.success) {
+              parsed.visualization.data = swotParsed.data;
+            } else {
+              // Fallback if entirely broken
+              parsed.visualization.data = { strengths: [], weaknesses: [], opportunities: [], threats: [] };
+            }
+          }
+        }
+        
         return { isJson: true, data: parsed };
       }
     } catch (e) {

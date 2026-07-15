@@ -130,9 +130,9 @@ export async function getRAGContext(
   question: string,
   user: UserContext,
   conversationHistory: any[] = []
-): Promise<RagContext[]> {
+): Promise<{ contexts: RagContext[], needsKnowledge: boolean }> {
   if (shouldSkipRAG(question)) {
-    return [];
+    return { contexts: [], needsKnowledge: false };
   }
 
   // 1. Use Planner to determine what to retrieve
@@ -145,8 +145,13 @@ export async function getRAGContext(
   ]);
 
   const needsWebSearch = plan ? plan.steps.some((s: any) => s.agent === "web_search") : false;
+  const needsKnowledge = plan ? plan.steps.some((s: any) => s.agent === "knowledge") : false;
+  
   if (needsWebSearch) {
     console.log("[ChatStreamService] Planner decided Web Search is needed.");
+  }
+  if (needsKnowledge) {
+    console.log("[ChatStreamService] Planner decided Knowledge Graph is needed.");
   }
 
   // 2. Execute RAG Retrieval in Parallel
@@ -211,7 +216,7 @@ export async function getRAGContext(
     candidateContexts = await ContextCompressorService.compressContexts(question, candidateContexts);
   }
 
-  return candidateContexts;
+  return { contexts: candidateContexts, needsKnowledge };
 }
 
 // ============================================================

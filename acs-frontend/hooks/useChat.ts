@@ -26,7 +26,7 @@ export const useChat = (options: UseChatOptions = {}) => {
   );
   const [effortLevel, setEffortLevel] = useState<string>("medium");
   const [isThinking, setIsThinking] = useState<boolean>(true);
-  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState<boolean>(true);
+  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState<boolean>(false);
 
   // Compose session management from extracted hook
   const sessionManager = useChatSessions();
@@ -225,8 +225,8 @@ export const useChat = (options: UseChatOptions = {}) => {
     userQuery: string,
     _mode: string,
     _persona: string,
-    _ontologyMode: string,
-    _ontologyOptions: any,
+    ontologyMode: string,
+    ontologyOptions: any,
     existingHistory?: ChatMessage[],
     files?: any[],
     modelOverride?: string,
@@ -318,7 +318,9 @@ export const useChat = (options: UseChatOptions = {}) => {
         activeEffort,
         activeThinking,
         isWebSearchEnabled,
-        images
+        images,
+        ontologyMode,
+        ontologyOptions
       );
 
       setChatHistory((prev) => [...prev, result]);

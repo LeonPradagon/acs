@@ -106,6 +106,7 @@ export const streamChatRequest = async (
   onStep?: (step: string) => void,
   onDone?: (model: string, confidence?: any) => void,
   onError?: (error: string) => void,
+  onOntology?: (data: any) => void,
   signal?: AbortSignal,
 ): Promise<void> => {
   const token =
@@ -127,6 +128,8 @@ export const streamChatRequest = async (
       effortLevel: options.effortLevel,
       isThinking: options.isThinking,
       isWebSearchEnabled: options.isWebSearchEnabled,
+      ontologyMode: options.ontologyMode,
+      ontologyOptions: options.ontologyOptions,
     }),
     signal,
   });
@@ -173,6 +176,9 @@ export const streamChatRequest = async (
               case "done":
                 onDone?.(data.model, data.confidence);
                 break;
+              case "ontology":
+                onOntology?.(data.data);
+                break;
               case "error":
                 onError?.(data.message);
                 break;
@@ -205,7 +211,9 @@ export const processQuery = async (
   effortLevel?: string,
   isThinking?: boolean,
   isWebSearchEnabled?: boolean,
-  images?: string[]
+  images?: string[],
+  ontologyMode?: string,
+  ontologyOptions?: any
 ): Promise<ChatMessage> => {
   const startTime = Date.now();
 
@@ -216,11 +224,12 @@ export const processQuery = async (
       let attachments: any[] = [];
       let modelUsed = "openai/gpt-oss-120b";
       let confidenceScore: any = undefined;
+      let ontologyData: any = undefined;
 
       streamChatRequest(
         userQuery,
         chatHistory,
-        { sessionId, files, model, effortLevel, isThinking, isWebSearchEnabled, images, onAttachment: (att: any) => attachments.push(att) },
+        { sessionId, files, model, effortLevel, isThinking, isWebSearchEnabled, images, ontologyMode, ontologyOptions, onAttachment: (att: any) => attachments.push(att) },
         (token) => {
           fullContent += token;
           onStreamToken(token);
@@ -244,10 +253,14 @@ export const processQuery = async (
             modelUsed,
             confidence: confidenceScore,
             processingTime: Date.now() - startTime,
+            ontology_data: ontologyData,
           });
         },
         (errorMsg) => {
           reject(new Error(errorMsg));
+        },
+        (ontologyPayload) => {
+          ontologyData = ontologyPayload;
         },
         signal,
       );

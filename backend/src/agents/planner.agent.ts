@@ -39,7 +39,10 @@ You must output valid JSON in the following format:
     {
       "agent": "agent_name",
       "action": "description of what the agent should do",
-      "priority": 1
+      "priority": 1,
+      "params": {
+        "timeRange": "realtime"
+      }
     }
   ],
   "needsMemory": true
@@ -50,8 +53,9 @@ Rules:
 2. For simple conversational queries (like "hi" or general questions), just use "general".
 3. For questions about salary, employees, or structured data, use "erp".
 4. For questions about documents, files, reports, use "retrieval".
-5. For questions about external facts, current events, or public knowledge, use "web_search".
-6. Set "needsMemory" to true if the query seems to depend on past context or preferences.`;
+5. For questions about external facts, current events, or public knowledge, use "web_search". If the user explicitly asks for breaking news, latest updates, or real-time information (e.g. "today", "latest", "hari ini"), add "params": { "timeRange": "realtime" } to the step.
+6. Set "needsMemory" to true if the query seems to depend on past context or preferences.
+7. For questions about relationships between entities (people, organizations, technologies), use "knowledge". Also use "knowledge" when the user asks about organizational structure, dependencies, or connections.`;
 
       const userPrompt = `User Query: "${context.query}"\n\nGenerate the JSON execution plan:`;
 

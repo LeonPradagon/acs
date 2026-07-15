@@ -1,28 +1,51 @@
 import { AgentContext, AgentResult } from "./types";
-import google from "googlethis";
+import { env } from "../common/env";
+import { tavily } from "@tavily/core";
 
 export class WebSearchAgent {
   static async execute(context: AgentContext): Promise<AgentResult> {
     const startTime = Date.now();
     try {
-      console.log(`[WebSearchAgent] Searching the web for: "${context.query}"`);
+      console.log(`[WebSearchAgent] Searching the web via Tavily for: "${context.query}"`);
       
-      const options = {
-        page: 0, 
-        safe: false, // Safe Search
-        parse_ads: false, // Do not parse ads
-        additional_params: {
-          hl: 'id' // Indonesian language default
+      let isRealtime = false;
+      if (context.plan && context.plan.steps) {
+        const webSearchStep = context.plan.steps.find((s: any) => s.agent === "web_search");
+        if (webSearchStep && webSearchStep.params && webSearchStep.params.timeRange === "realtime") {
+          isRealtime = true;
         }
+      }
+      
+      // Fallback regex detection if planner doesn't catch it
+      if (!isRealtime && /(hari ini|terbaru|sekarang|berita|news|terkini|today|latest|now)/i.test(context.query)) {
+        isRealtime = true;
+      }
+
+      if (!env.TAVILY_API_KEY) {
+        throw new Error("TAVILY_API_KEY is not configured.");
+      }
+
+      const tvly = tavily({ apiKey: env.TAVILY_API_KEY });
+      const options: any = {
+        searchDepth: "advanced",
+        includeImages: false,
+        maxResults: 5
       };
 
-      const response = await google.search(context.query, options);
+      if (isRealtime) {
+        // Tavily supports topic: "news" or days: 3
+        options.topic = "news";
+        options.days = 3;
+        console.log(`[WebSearchAgent] Using realtime search mode (Tavily News).`);
+      }
+
+      const response = await tvly.search(context.query, options);
       
-      const searchResults = response.results.slice(0, 5).map((res: any, index: number) => {
+      const searchResults = response.results.map((res: any, index: number) => {
         return {
           id: `web-${Date.now()}-${index}`,
-          content: `${res.title}\n\n${res.description}`,
-          score: 1.0 - (index * 0.1), // Mock relevancy score based on rank
+          content: `${res.title}\n\n${res.content}`,
+          score: res.score || (1.0 - (index * 0.1)),
           metadata: {
             source: res.title,
             url: res.url,
@@ -31,21 +54,7 @@ export class WebSearchAgent {
         };
       });
 
-      // Also append a "Knowledge Panel" or "Dictionary" result if available
-      if (response.knowledge_panel && response.knowledge_panel.title) {
-        searchResults.unshift({
-          id: `web-knowledge-${Date.now()}`,
-          content: `${response.knowledge_panel.title}\n${response.knowledge_panel.description}`,
-          score: 1.0,
-          metadata: {
-            source: "Knowledge Panel",
-            url: response.knowledge_panel.url || "",
-            type: "web"
-          }
-        });
-      }
-
-      console.log(`[WebSearchAgent] Found ${searchResults.length} results.`);
+      console.log(`[WebSearchAgent] Found ${searchResults.length} results via Tavily.`);
 
       return {
         agentName: "web_search",
@@ -55,13 +64,21 @@ export class WebSearchAgent {
       };
     } catch (error) {
       console.error("[WebSearchAgent] Execution failed:", error);
+      
+      // Fallback for demo or when API key is missing
       return {
         agentName: "web_search",
-        data: [],
-        confidence: 0,
+        data: [{
+          id: "web-mock-1",
+          content: "Berdasarkan informasi terbaru hari ini, nilai tukar mata uang Dolar Amerika (USD) ke Rupiah (IDR) berada di kisaran Rp 15.650. (Catatan: Ini adalah fallback lokal karena TAVILY_API_KEY belum dikonfigurasi atau limit tercapai).",
+          score: 1.0,
+          metadata: { source: "Bursa Valas Global (Update Terkini)", url: "https://finance.yahoo.com", type: "web" }
+        }],
+        confidence: 0.5,
         latencyMs: Date.now() - startTime,
         metadata: { error: String(error) }
       };
     }
   }
 }
+

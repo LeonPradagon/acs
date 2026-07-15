@@ -16,8 +16,15 @@ import {
   Loader2,
   AlertCircle,
   XCircle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -476,6 +483,46 @@ const AttachmentCards = ({ message }: { message: ChatMessage }) => {
   );
 };
 
+const ThinkingBlock = ({ thinkContent, isThinkingComplete }: { thinkContent: string, isThinkingComplete: boolean }) => {
+  const [isOpen, setIsOpen] = useState(!isThinkingComplete);
+  
+  // Auto-close when thinking is complete
+  useEffect(() => {
+    if (isThinkingComplete) {
+      setIsOpen(false);
+    } else {
+      setIsOpen(true);
+    }
+  }, [isThinkingComplete]);
+
+  if (!thinkContent) return null;
+
+  return (
+    <Collapsible
+      open={isOpen}
+      onOpenChange={setIsOpen}
+      className="w-full mb-4 bg-[var(--surface-variant)]/20 border border-border/40 rounded-xl overflow-hidden transition-all duration-300"
+    >
+      <CollapsibleTrigger className="flex w-full items-center justify-between p-3 text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-colors">
+        <div className="flex items-center gap-2">
+          {isThinkingComplete ? (
+            <Brain className="w-4 h-4 text-blue-500/70" />
+          ) : (
+            <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+          )}
+          <span className={isThinkingComplete ? "text-foreground/70" : "text-blue-500 font-semibold"}>
+            {isThinkingComplete ? "Thinking Process" : "Thinking..."}
+          </span>
+        </div>
+        {isOpen ? <ChevronUp className="w-4 h-4 opacity-50" /> : <ChevronDown className="w-4 h-4 opacity-50" />}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="p-4 pt-1 border-t border-border/30 bg-background/30 text-xs font-mono text-muted-foreground">
+        <MarkdownText text={thinkContent} />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
+
 /**
  * Internal component to route different types of assistant content
  */
@@ -529,23 +576,15 @@ const MessageContentRouter = ({ message, isProcessing }: { message: ChatMessage;
     case "text_response":
       return (
         <div className="space-y-6">
-          {thinkContent && (
-            <div className="text-muted-foreground bg-[var(--surface-variant)]/30 border border-border/50 rounded-xl p-4 text-xs font-mono mb-4 animate-in fade-in duration-300">
-              <div className="flex items-center gap-2 mb-2 font-semibold text-blue-500">
-                <Brain className="w-4 h-4" />
-                <span>Thinking Process</span>
-              </div>
-              <MarkdownText text={thinkContent} />
-            </div>
-          )}
+          <ThinkingBlock thinkContent={thinkContent} isThinkingComplete={isThinkingComplete} />
           
-          {isProcessing && (isThinkingComplete || !thinkContent) ? (
+          {isProcessing && !displayContent && (isThinkingComplete || !thinkContent) ? (
             <div className="flex items-center gap-2 font-semibold text-primary py-2">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Menyusun jawaban...</span>
             </div>
           ) : (
-            displayContent && !isProcessing && <MarkdownText text={displayContent} />
+            displayContent && <MarkdownText text={displayContent} />
           )}
           {hasAttachments && <AttachmentCards message={message} />}
           <MessageMetadata message={message} />
@@ -555,24 +594,16 @@ const MessageContentRouter = ({ message, isProcessing }: { message: ChatMessage;
     default:
       return (
         <div className="space-y-6">
-          {thinkContent && (
-            <div className="text-muted-foreground bg-[var(--surface-variant)]/30 border border-border/50 rounded-xl p-4 text-xs font-mono mb-4 animate-in fade-in duration-300">
-              <div className="flex items-center gap-2 mb-2 font-semibold text-blue-500">
-                <Brain className="w-4 h-4" />
-                <span>Thinking Process</span>
-              </div>
-              <MarkdownText text={thinkContent} />
-            </div>
-          )}
+          <ThinkingBlock thinkContent={thinkContent} isThinkingComplete={isThinkingComplete} />
           {hasVisualization && <VisualAnalysisContent message={message} />}
           
-          {isProcessing && (isThinkingComplete || !thinkContent) ? (
+          {isProcessing && !displayContent && (isThinkingComplete || !thinkContent) ? (
             <div className="flex items-center gap-2 font-semibold text-primary py-2">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Menyusun jawaban...</span>
             </div>
           ) : (
-            displayContent && !isProcessing && <MarkdownText text={displayContent} />
+            displayContent && <MarkdownText text={displayContent} />
           )}
           {hasAttachments && <AttachmentCards message={message} />}
           <MessageMetadata message={message} />

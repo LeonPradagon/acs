@@ -299,6 +299,25 @@ export class EmailService {
     }
   }
 
+  /**
+   * Search emails - works for both IMAP and OAuth
+   */
+  static async searchEmails(
+    userId: string, 
+    params: { keyword?: string; subject?: string; from?: string; limit?: number }
+  ) {
+    const connection = await prisma.emailConnection.findUnique({ where: { userId } });
+    if (!connection) throw new Error("Email not connected");
+
+    const stored: StoredCredentials = JSON.parse(decrypt(connection.encryptedTokens));
+
+    if (stored.type === "imap") {
+      return this.searchEmailsImap(userId, params);
+    } else {
+      return this.searchEmailsOAuth(userId, params);
+    }
+  }
+
   // ============================================================
   // IMAP Email Operations
   // ============================================================
@@ -399,6 +418,56 @@ export class EmailService {
     }
   }
 
+  private static async searchEmailsImap(userId: string, params: { keyword?: string; subject?: string; from?: string; limit?: number }) {
+    const { client } = await this.getImapClient(userId);
+    const limit = params.limit || 10;
+
+    try {
+      await client.connect();
+      const lock = await client.getMailboxLock("INBOX");
+
+      try {
+        const searchCriteria: any = {};
+        if (params.keyword) searchCriteria.body = params.keyword;
+        if (params.subject) searchCriteria.subject = params.subject;
+        if (params.from) searchCriteria.from = params.from;
+        
+        // If no criteria provided, just return recent
+        if (Object.keys(searchCriteria).length === 0) {
+           return this.getInboxImap(userId, 1, limit);
+        }
+
+        const uids = await client.search(searchCriteria);
+        if (!uids || uids.length === 0) return { messages: [] };
+
+        // Take the latest 'limit' messages
+        const recentUids = typeof uids === 'object' && Array.isArray(uids) ? uids.slice(-limit).reverse() : [uids];
+        const messages: any[] = [];
+
+        for await (const msg of client.fetch(recentUids, {
+          uid: true,
+          envelope: true,
+          flags: true,
+        })) {
+          messages.push({
+            id: String(msg.uid),
+            subject: msg.envelope?.subject || "(No Subject)",
+            from: msg.envelope?.from?.[0]?.name || msg.envelope?.from?.[0]?.address || "Unknown",
+            fromEmail: msg.envelope?.from?.[0]?.address || "",
+            receivedAt: msg.envelope?.date?.toISOString() || new Date().toISOString(),
+            isRead: msg.flags?.has("\\Seen") || false,
+          });
+        }
+
+        return { messages };
+      } finally {
+        lock.release();
+      }
+    } finally {
+      await client.logout().catch(() => {});
+    }
+  }
+
   // ============================================================
   // OAuth Email Operations (Microsoft Graph API)
   // ============================================================
@@ -476,6 +545,41 @@ export class EmailService {
       receivedAt: msg.receivedDateTime,
       body: msg.body?.content || "", bodyType: msg.body?.contentType || "text",
       isRead: msg.isRead, hasAttachments: msg.hasAttachments,
+    };
+  }
+
+  private static async searchEmailsOAuth(userId: string, params: { keyword?: string; subject?: string; from?: string; limit?: number }) {
+    const accessToken = await this.getValidOAuthToken(userId);
+    const limit = params.limit || 10;
+    
+    // Build OData $search query string
+    const searchTerms = [];
+    if (params.keyword) searchTerms.push(`"${params.keyword}"`);
+    if (params.subject) searchTerms.push(`subject:"${params.subject}"`);
+    if (params.from) searchTerms.push(`from:"${params.from}"`);
+    
+    let url = `https://graph.microsoft.com/v1.0/me/messages?$top=${limit}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments`;
+    
+    if (searchTerms.length > 0) {
+      const searchQuery = searchTerms.join(" AND ");
+      url += `&$search="${encodeURIComponent(searchQuery)}"`;
+    }
+    
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!response.ok) throw new Error("Failed to search emails");
+    
+    const data = await response.json();
+    return {
+      messages: (data.value || []).map((msg: any) => ({
+        id: msg.id,
+        subject: msg.subject,
+        from: msg.from?.emailAddress?.name || msg.from?.emailAddress?.address || "Unknown",
+        fromEmail: msg.from?.emailAddress?.address || "",
+        receivedAt: msg.receivedDateTime,
+        preview: msg.bodyPreview,
+        isRead: msg.isRead,
+        hasAttachments: msg.hasAttachments,
+      })),
     };
   }
 

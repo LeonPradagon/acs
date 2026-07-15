@@ -19,6 +19,7 @@ import { EvaluationService } from "../services/evaluation.service";
 import { SemanticCacheService } from "../services/semantic-cache.service";
 import { MemoryService } from "../services/memory.service";
 import { GuardrailsService } from "../services/guardrails.service";
+import { KnowledgeGraphService } from "../services/knowledge-graph.service";
 
 const recordTokenUsage = async (userId: string | undefined, question: string, response: string, model: string) => {
   if (!userId) return;
@@ -215,7 +216,7 @@ export const streamChat = async (req: AuthRequest, res: Response): Promise<void>
     // 2. Build history
     const conversationHistory = buildConversationHistory(messages);
 
-    const contexts = await getRAGContext(question, {
+    const { contexts, needsKnowledge } = await getRAGContext(question, {
       userId: req.user?.userId,
       divisionId: req.user?.divisionId,
       role: req.user?.role,
@@ -376,6 +377,27 @@ export const streamChat = async (req: AuthRequest, res: Response): Promise<void>
             contextCoverage: contexts.length > 0 ? 0.8 : 0.2
           });
 
+          // Generate Ontology if requested or needed by planner
+          const shouldGenerateOntology = needsKnowledge || req.body.ontologyMode !== undefined;
+          
+          if (shouldGenerateOntology && !isClientDisconnected) {
+            try {
+              res.write(
+                `data: ${JSON.stringify({ type: "step", step: "🕸️ Membuat graf hubungan..." })}\n\n`
+              );
+              const ontologyData = await KnowledgeGraphService.buildOntologyResponse(
+                question, 
+                fullResponse, 
+                contexts
+              );
+              if (ontologyData && ontologyData.nodes && ontologyData.nodes.length > 0) {
+                res.write(`data: ${JSON.stringify({ type: "ontology", data: ontologyData })}\n\n`);
+              }
+            } catch (err) {
+              console.warn("[Ontology] Failed to generate:", err);
+            }
+          }
+
           res.write(
             `data: ${JSON.stringify({ type: "step", step: "✅ Selesai" })}\n\n`,
           );
@@ -465,7 +487,7 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
     const conversationHistory = buildConversationHistory(messages);
 
     // Query Classification & Multi-Query Retrieval
-    const contexts = await getRAGContext(question, {
+    const { contexts, needsKnowledge } = await getRAGContext(question, {
       userId: req.user?.userId,
       divisionId: req.user?.divisionId,
       role: req.user?.role,
@@ -598,6 +620,24 @@ export const universalChat = async (req: AuthRequest, res: Response) => {
       responseObj.type = "text_response";
       responseObj.answer = responseData.data;
       responseObj.narrative = responseData.data;
+    }
+
+    // Generate Ontology if requested or needed by planner
+    const shouldGenerateOntology = needsKnowledge || req.body.ontologyMode !== undefined;
+    
+    if (shouldGenerateOntology) {
+      try {
+        const ontologyData = await KnowledgeGraphService.buildOntologyResponse(
+          question, 
+          answerContent, 
+          contexts
+        );
+        if (ontologyData && ontologyData.nodes && ontologyData.nodes.length > 0) {
+          responseObj.ontology_data = ontologyData;
+        }
+      } catch (err) {
+        console.warn("[Ontology] Failed to generate for universal chat:", err);
+      }
     }
 
     res.status(200).json(responseObj);
