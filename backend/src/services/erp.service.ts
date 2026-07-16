@@ -199,23 +199,33 @@ export class ErpService {
   // ERP API MODE (Mock Implementation)
   // ===================================
 
-  /**
-   * Returns the REST API documentation of the ERP to be injected into the LLM prompt.
-   */
   static async getErpApiInfo(): Promise<string> {
     const customSchema = await prisma.systemSetting.findUnique({ where: { key: "ERP_API_SCHEMA_DOC" } });
-    if (customSchema && customSchema.value) {
+    const baseUrlSetting = await prisma.systemSetting.findUnique({ where: { key: "ERP_API_BASE_URL" } });
+
+    if (customSchema && customSchema.value && customSchema.value.trim().length > 0) {
       return customSchema.value;
     }
 
     return `
-    Enterprise REST API Documentation (Version 1.0):
+    Enterprise REST API Documentation (Fallback):
 
+    The user has configured the following Base URL: ${baseUrlSetting?.value || "Not Set"}
+    
+    If this Base URL is ALREADY the full, exact endpoint path (for example, it ends in /pegawai, /employees, or /data), you MUST pass an EMPTY STRING "" as the endpoint parameter.
+
+    IMPORTANT QUERY PARAMS:
+    To search for a specific employee, you MUST pass the following in queryParams:
+      - nip (string, optional): Search by Exact NIP (e.g., {"nip": "198309102008121006"})
+      - search (string, optional): Search by Name
+
+    Otherwise, if it's just a root domain, use these Mock Endpoints:
     Endpoint 1: GET /api/v1/employees
     Description: Retrieve a list of employees.
     QueryParams: 
       - divisionName (optional): filter by division, e.g., 'IT', 'HRD'
       - status (optional): 'ACTIVE' or 'INACTIVE'
+      - nip (optional): filter by NIP
     
     Endpoint 2: GET /api/v1/salaries
     Description: Retrieve salaries for employees.
@@ -223,7 +233,6 @@ export class ErpService {
       - employeeId (optional): filter by specific employee UUID
 
     Rules for Querying:
-      - You MUST specify the exact endpoint string (e.g. '/api/v1/employees').
       - Pass queryParams as a JSON string.
     `.trim();
   }
@@ -247,10 +256,33 @@ export class ErpService {
       if (baseUrlSetting && baseUrlSetting.value) {
         console.log(`[ERP Service] Using external API connection`);
         const baseUrl = baseUrlSetting.value.replace(/\/$/, "");
-        const fullUrl = `${baseUrl}${endpoint}`;
+        
+        let safeEndpoint = endpoint || "";
+        if (safeEndpoint && !safeEndpoint.startsWith("/")) {
+          safeEndpoint = "/" + safeEndpoint;
+        }
+        
+        let fullUrl = `${baseUrl}${safeEndpoint}`;
+        
+        // FOOLPROOF FIX: 
+        // If the user's Base URL already contains a specific path (e.g. /api/integration/pegawai)
+        // AND the AI hallucinates the default mock endpoint (/api/v1/employees), override it!
+        try {
+          const parsedBase = new URL(baseUrl);
+          if (parsedBase.pathname.length > 1 && (safeEndpoint === "/api/v1/employees" || safeEndpoint === "/api/v1/salaries")) {
+             fullUrl = baseUrl;
+             console.log(`[ERP Service] Overriding default mock endpoint. Using exact Base URL: ${fullUrl}`);
+          }
+        } catch (e) {
+          // Ignore invalid URLs
+        }
+
+        console.log(`[ERP Service] Final Request URL: ${fullUrl}`);
+        
         const headers: any = {};
         if (apiKeySetting && apiKeySetting.value) {
            headers["Authorization"] = `Bearer ${apiKeySetting.value}`;
+           headers["x-api-key"] = apiKeySetting.value;
         }
         
         const response = await axios.get(fullUrl, { params, headers, timeout: 15000 });

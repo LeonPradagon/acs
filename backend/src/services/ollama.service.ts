@@ -374,52 +374,48 @@ export const getStreamingResponse = async (
     while (depth < MAX_TOOL_DEPTH) {
       const stream = await llmWithTools.stream(lcHistory, { signal: abortSignal });
       
-      let fullContent = "";
-      let toolCallsAccumulator: any = {};
+      let finalChunk: any = null;
+      let reportedToolCalls = new Set();
 
       for await (const chunk of stream) {
+        if (!finalChunk) {
+          finalChunk = chunk;
+        } else {
+          finalChunk = finalChunk.concat(chunk);
+        }
+
         if (chunk.content) {
-          fullContent += chunk.content;
           onToken(chunk.content.toString());
         }
         
-        if (chunk.tool_calls && chunk.tool_calls.length > 0) {
-          for (const tc of chunk.tool_calls) {
-            const tcAny = tc as any;
-            const idx = tcAny.index || tcAny.id || tcAny.name || 0;
-            if (!toolCallsAccumulator[idx]) {
-              toolCallsAccumulator[idx] = { id: tc.id, name: tc.name, args: "" };
+        // Report tool call starting
+        if (finalChunk.tool_calls && finalChunk.tool_calls.length > 0) {
+          for (const tc of finalChunk.tool_calls) {
+            const tcId = tc.id || tc.name;
+            if (!reportedToolCalls.has(tcId)) {
+              reportedToolCalls.add(tcId);
               const displayName = tc.name === "query_erp_sql" ? "ERP Database" : "API Endpoint";
               onToken(`\n\n*⏳ Mengambil data dari ${displayName}...*\n`);
-            }
-            if (tc.args) {
-              toolCallsAccumulator[idx].args += JSON.stringify(tc.args);
             }
           }
         }
       }
       
-      const toolCalls = Object.values(toolCallsAccumulator) as any[];
+      const fullContent = finalChunk?.content?.toString() || "";
+      const toolCalls = finalChunk?.tool_calls || [];
       
       if (toolCalls.length === 0) {
         break; // No more tool calls, we are done
       }
       
-      // Parse arguments
-      for (const tc of toolCalls) {
-        try {
-          if (tc.args && typeof tc.args === "string" && tc.args.startsWith('"')) {
-            tc.args = JSON.parse(tc.args);
-          }
-        } catch(e) {}
-      }
+      // Arguments are already parsed properly by finalChunk.concat()
 
       lcHistory.push(new AIMessage({
         content: fullContent,
         tool_calls: toolCalls
       }));
       
-      const toolPromises = toolCalls.map(async (toolCall) => {
+      const toolPromises = toolCalls.map(async (toolCall: any) => {
         const tool = tools.find((t) => t.name === toolCall.name);
         if (tool) {
           let retries = 2;
