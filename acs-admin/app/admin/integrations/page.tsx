@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useAdmin } from "@/hooks/useAdmin";
 import { Button } from "@/components/ui/button";
-import { Database, Globe, Key, Shield, CheckCircle, XCircle, Loader2, Plus } from "lucide-react";
+import { Database, Globe, Key, Shield, CheckCircle, XCircle, Loader2, Plus, Edit2, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,7 @@ export default function IntegrationsCMSPage() {
   
   const [connections, setConnections] = useState<ConnectionEntry[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     adminInfo.fetchSystemSettings();
@@ -123,21 +124,42 @@ export default function IntegrationsCMSPage() {
     }
     
     // Update connections history
-    const newConnection: ConnectionEntry = {
-      id: Date.now().toString(),
-      mode,
-      url: currentUrl,
-      createdAt: new Date().toISOString(),
-      status: "Active"
-    };
-
-    // Deactivate previous active connection
-    const updatedConnections = connections.map(c => ({
-      ...c,
-      status: c.status === "Active" ? "Success" : c.status
-    }));
+    let nextConnections;
     
-    const nextConnections = [newConnection, ...updatedConnections];
+    if (editingId) {
+      // Find the old connection
+      const oldConn = connections.find(c => c.id === editingId);
+      const updatedConnection: ConnectionEntry = {
+        ...(oldConn as ConnectionEntry),
+        mode,
+        url: currentUrl,
+        status: "Active"
+      };
+      // Deactivate previous active connections
+      nextConnections = connections.map(c => {
+        if (c.id === editingId) return updatedConnection;
+        return { ...c, status: c.status === "Active" ? "Success" : c.status };
+      });
+      // Move edited to top
+      nextConnections = [updatedConnection, ...nextConnections.filter(c => c.id !== editingId)];
+    } else {
+      const newConnection: ConnectionEntry = {
+        id: Date.now().toString(),
+        mode,
+        url: currentUrl,
+        createdAt: new Date().toISOString(),
+        status: "Active"
+      };
+  
+      // Deactivate previous active connection
+      const updatedConnections = connections.map(c => ({
+        ...c,
+        status: c.status === "Active" ? "Success" : c.status
+      }));
+      
+      nextConnections = [newConnection, ...updatedConnections];
+    }
+    
     setConnections(nextConnections);
     await adminInfo.updateSystemSetting("ERP_CONNECTIONS_HISTORY", JSON.stringify(nextConnections));
 
@@ -146,10 +168,12 @@ export default function IntegrationsCMSPage() {
     setTimeout(() => {
       setTestMessage("");
       setIsDialogOpen(false);
+      setEditingId(null);
     }, 1500);
   };
 
   const handleOpenAddConnection = () => {
+    setEditingId(null);
     setMode("DB");
     setDbUrl("");
     setApiUrl("");
@@ -159,6 +183,27 @@ export default function IntegrationsCMSPage() {
     setTestStatus("idle");
     setTestMessage("");
     setIsDialogOpen(true);
+  };
+
+  const handleEditConnection = (conn: ConnectionEntry) => {
+    setEditingId(conn.id);
+    setMode(conn.mode);
+    if (conn.mode === "DB") {
+      setDbUrl(conn.url);
+      // We don't have schema saved in history, but we can fetch it if it's the active one
+      // For now, let it be populated if it's the active one via settings fallback
+    } else {
+      setApiUrl(conn.url);
+    }
+    setTestStatus("idle");
+    setTestMessage("");
+    setIsDialogOpen(true);
+  };
+
+  const handleDeleteConnection = async (id: string) => {
+    const nextConnections = connections.filter(c => c.id !== id);
+    setConnections(nextConnections);
+    await adminInfo.updateSystemSetting("ERP_CONNECTIONS_HISTORY", JSON.stringify(nextConnections));
   };
 
   return (
@@ -360,7 +405,8 @@ export default function IntegrationsCMSPage() {
                   <TableHead className="w-[120px]">Mode</TableHead>
                   <TableHead>URL / Endpoint</TableHead>
                   <TableHead className="w-[180px]">Date Configured</TableHead>
-                  <TableHead className="w-[120px] text-right">Status</TableHead>
+                  <TableHead className="w-[100px] text-center">Status</TableHead>
+                  <TableHead className="w-[100px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -382,7 +428,7 @@ export default function IntegrationsCMSPage() {
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(conn.createdAt).toLocaleDateString()} {new Date(conn.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-center">
                       {conn.status === "Active" ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
                           Active
@@ -392,6 +438,28 @@ export default function IntegrationsCMSPage() {
                           Success
                         </span>
                       )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="w-8 h-8 text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50"
+                          onClick={() => handleEditConnection(conn)}
+                          title="Edit Connection"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="w-8 h-8 text-muted-foreground hover:text-red-600 hover:bg-red-50"
+                          onClick={() => handleDeleteConnection(conn.id)}
+                          title="Delete Connection"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
