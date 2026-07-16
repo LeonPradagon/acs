@@ -2,6 +2,7 @@ import { AgentContext, AgentResult } from "./types";
 import { EmailService } from "../services/email.service";
 import { ModelRouterService } from "../services/model-router.service";
 import { z } from "zod";
+import { ChatOpenAI } from "@langchain/openai";
 
 const SearchIntentSchema = z.object({
   keyword: z.string().optional().describe("General keywords to search for in body"),

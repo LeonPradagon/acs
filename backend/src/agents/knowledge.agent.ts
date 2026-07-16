@@ -2,6 +2,7 @@ import { AgentContext, AgentResult } from "./types";
 import { KnowledgeGraphService } from "../services/knowledge-graph.service";
 import { ModelRouterService } from "../services/model-router.service";
 import { z } from "zod";
+import { ChatOpenAI } from "@langchain/openai";
 
 const EntityExtractionSchema = z.object({
   entities: z.array(z.string()).describe("List of key entities (people, organizations, projects, concepts) extracted from the query"),
